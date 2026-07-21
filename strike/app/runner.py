@@ -38,6 +38,7 @@ class AttemptsFile(BaseModel):
     objective: str
     owasp_id: str
     success_pattern: str
+    success_normalization: Literal["none", "strip_separators"] = "none"
     attempts: list[StaticAttempt] = Field(min_length=1)
 
 
@@ -62,6 +63,16 @@ def utc_now() -> datetime:
     """Return a timezone-aware timestamp for a terminal campaign update."""
 
     return datetime.now(timezone.utc)
+
+
+def normalize_success_reply(reply: str, normalization: str) -> str:
+    """Apply the attempts file's narrowly defined success-match normalization."""
+
+    if normalization == "none":
+        return reply
+    if normalization == "strip_separators":
+        return re.sub(r"[ \t\n\r\-_.]", "", reply)
+    raise ValueError(f"unsupported success normalization: {normalization}")
 
 
 async def update_campaign(
@@ -197,7 +208,17 @@ async def run_campaign(
                         if isinstance(response_body, dict)
                         else None
                     )
-                    matched = isinstance(reply, str) and success_regex.search(reply) is not None
+                    match_candidate = (
+                        normalize_success_reply(
+                            reply, attempts_file.success_normalization
+                        )
+                        if isinstance(reply, str)
+                        else None
+                    )
+                    matched = (
+                        isinstance(match_candidate, str)
+                        and success_regex.search(match_candidate) is not None
+                    )
                     print(
                         "campaign_attempt"
                         f" campaign_id={campaign_id} index={index}"
