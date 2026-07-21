@@ -1,0 +1,10 @@
+- id: block-high-confidence-injection
+  owasp_id: LLM01
+  enabled: true
+  detector: prompt_guard_2
+  matcher_type: threshold
+  matcher_config:
+    signal_field: injection_score
+    threshold: 0.8
+    comparison: gte
+  action: block

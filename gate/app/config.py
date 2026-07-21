@@ -24,6 +24,7 @@ class Settings:
         os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")
     )
     gate_port: int = int(os.getenv("GATE_PORT", "8000"))
+    hf_token: str | None = os.getenv("HF_TOKEN") or None
 
 
 settings = Settings()

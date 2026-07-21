@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import json
 import logging
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 from uuid import UUID, uuid4
@@ -18,6 +19,8 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
+from detectors.prompt_guard import PromptGuardDetector
+from policy.engine import PolicyEngine
 
 
 logging.basicConfig(
@@ -25,6 +28,8 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 logger = logging.getLogger("bastion.gate")
+
+RULES_PATH = Path(__file__).resolve().parent.parent / "policy" / "rules.yaml"
 
 requests_table = Table(
     "requests",
@@ -37,6 +42,9 @@ requests_table = Table(
     Column("upstream_status", Integer, nullable=True),
     Column("latency_ms", Float(precision=53), nullable=True),
     Column("error", Text, nullable=True),
+    Column("policy_action", Text, nullable=True),
+    Column("matched_rules", JSONB, nullable=True),
+    Column("detector_signals", JSONB, nullable=True),
     schema="gate",
 )
 
@@ -126,10 +134,17 @@ class StreamAccumulator:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Create one async database engine for the Gate process lifetime."""
+    """Create Gate's process-lifetime infrastructure and defensive components."""
 
     app.state.database_engine = create_async_engine(settings.database_url)
     try:
+        app.state.policy_engine = PolicyEngine.from_yaml(RULES_PATH)
+        if not settings.hf_token:
+            raise RuntimeError(
+                "HF_TOKEN is required to download the gated Prompt Guard 2 model; "
+                "set it in .env"
+            )
+        app.state.prompt_guard_detector = PromptGuardDetector.load()
         yield
     finally:
         await app.state.database_engine.dispose()
@@ -149,6 +164,9 @@ async def persist_request(
     upstream_status: int | None,
     latency_ms: float | None,
     error: str | None,
+    policy_action: str | None = None,
+    matched_rules: list[str] | None = None,
+    detector_signals: list[dict[str, Any]] | None = None,
 ) -> None:
     """Best-effort persistence that never changes the proxy response."""
 
@@ -165,6 +183,9 @@ async def persist_request(
                     upstream_status=upstream_status,
                     latency_ms=latency_ms,
                     error=error,
+                    policy_action=policy_action,
+                    matched_rules=matched_rules,
+                    detector_signals=detector_signals,
                 )
             )
     except Exception:
@@ -180,6 +201,9 @@ async def relay_stream(
     model: str,
     request_body: dict[str, Any],
     started_at: float,
+    policy_action: str | None,
+    matched_rules: list[str] | None,
+    detector_signals: list[dict[str, Any]],
 ) -> AsyncIterator[bytes]:
     """Relay upstream SSE bytes and persist one audit row when the stream ends."""
 
@@ -270,6 +294,9 @@ async def relay_stream(
             "upstream_status": upstream_response.status_code,
             "latency_ms": latency_ms,
             "error": error,
+            "policy_action": policy_action,
+            "matched_rules": matched_rules,
+            "detector_signals": detector_signals,
         }
         if cancellation is not None:
             asyncio.create_task(
@@ -306,6 +333,52 @@ async def chat_completions(request: Request) -> Response:
     model = requested_model if isinstance(requested_model, str) else ""
     stream_requested = body.get("stream") is True
     started_at = perf_counter()
+
+    user_content = "\n".join(
+        message["content"]
+        for message in body.get("messages", [])
+        if isinstance(message, dict)
+        and message.get("role") == "user"
+        and isinstance(message.get("content"), str)
+    )
+    prompt_guard_detector: PromptGuardDetector = request.app.state.prompt_guard_detector
+    detector_signal = await prompt_guard_detector.scan(user_content)
+    detector_signals = [detector_signal.model_dump(mode="json")]
+    policy_engine: PolicyEngine = request.app.state.policy_engine
+    policy_result = policy_engine.evaluate([detector_signal])
+    matched_rules = policy_result.matched_rules or None
+
+    if policy_result.action == "block":
+        rule_id = policy_result.terminal_rule_id
+        latency_ms = (perf_counter() - started_at) * 1000
+        response = JSONResponse(
+            status_code=400,
+            content={"error": "blocked by policy", "rule_id": rule_id},
+            headers={"X-Bastion-Request-Id": str(request_id)},
+        )
+        error = f"blocked by policy: {rule_id}"
+        logger.info(
+            "request_blocked request_id=%s model=%s latency_ms=%.2f rule_id=%s",
+            request_id,
+            requested_model,
+            latency_ms,
+            rule_id,
+        )
+        await persist_request(
+            request,
+            request_id=request_id,
+            model=model,
+            stream_requested=stream_requested,
+            request_body=body,
+            response_body=None,
+            upstream_status=response.status_code,
+            latency_ms=latency_ms,
+            error=error,
+            policy_action="block",
+            matched_rules=matched_rules,
+            detector_signals=detector_signals,
+        )
+        return response
 
     if stream_requested:
         client = httpx.AsyncClient(
@@ -344,6 +417,9 @@ async def chat_completions(request: Request) -> Response:
                 upstream_status=response.status_code,
                 latency_ms=latency_ms,
                 error=error,
+                policy_action=policy_result.action,
+                matched_rules=matched_rules,
+                detector_signals=detector_signals,
             )
             return response
 
@@ -356,6 +432,9 @@ async def chat_completions(request: Request) -> Response:
                 model=model,
                 request_body=body,
                 started_at=started_at,
+                policy_action=policy_result.action,
+                matched_rules=matched_rules,
+                detector_signals=detector_signals,
             ),
             status_code=upstream_response.status_code,
             media_type="text/event-stream",
@@ -395,6 +474,9 @@ async def chat_completions(request: Request) -> Response:
             upstream_status=response.status_code,
             latency_ms=latency_ms,
             error=error,
+            policy_action=policy_result.action,
+            matched_rules=matched_rules,
+            detector_signals=detector_signals,
         )
         return response
 
@@ -433,5 +515,8 @@ async def chat_completions(request: Request) -> Response:
         upstream_status=response.status_code,
         latency_ms=latency_ms,
         error=error,
+        policy_action=policy_result.action,
+        matched_rules=matched_rules,
+        detector_signals=detector_signals,
     )
     return response
