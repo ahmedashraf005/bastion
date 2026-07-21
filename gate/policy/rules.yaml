@@ -19,3 +19,13 @@
   matcher_config:
     signal_field: matched
   action: redact
+
+- id: redact-input-pii
+  owasp_id: LLM02
+  enabled: true
+  stage: input
+  detector: presidio_pii
+  matcher_type: list_nonempty
+  matcher_config:
+    signal_field: entities
+  action: redact

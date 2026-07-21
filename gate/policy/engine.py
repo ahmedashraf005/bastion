@@ -93,6 +93,8 @@ class PolicyEngine:
             return PolicyEngine._matches_threshold(rule.matcher_config, signal)
         if rule.matcher_type == "boolean_true":
             return PolicyEngine._matches_boolean_true(rule.matcher_config, signal)
+        if rule.matcher_type == "list_nonempty":
+            return PolicyEngine._matches_list_nonempty(rule.matcher_config, signal)
 
         raise ValueError(f"unsupported matcher_type: {rule.matcher_type}")
 
@@ -126,3 +128,15 @@ class PolicyEngine:
             raise ValueError("invalid boolean_true matcher configuration") from exc
 
         return getattr(signal, signal_field, None) is True
+
+    @staticmethod
+    def _matches_list_nonempty(
+        matcher_config: dict[str, Any], signal: DetectorSignal
+    ) -> bool:
+        try:
+            signal_field = matcher_config["signal_field"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("invalid list_nonempty matcher configuration") from exc
+
+        signal_value = getattr(signal, signal_field, None)
+        return isinstance(signal_value, list) and bool(signal_value)

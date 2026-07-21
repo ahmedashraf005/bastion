@@ -1,0 +1,8 @@
+- entity_type: EMAIL_ADDRESS
+  threshold: 0.5
+- entity_type: PHONE_NUMBER
+  threshold: 0.5
+- entity_type: CREDIT_CARD
+  threshold: 0.5
+- entity_type: US_SSN
+  threshold: 0.5

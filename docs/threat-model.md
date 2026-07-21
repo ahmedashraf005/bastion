@@ -23,6 +23,10 @@ is intentionally designed, implemented, and tested.
 | LLM08 | Vector & Embedding Weaknesses | No (later) |
 | LLM10 | Unbounded Consumption | Yes |
 
+LLM02 input PII is detected and redacted before it reaches the upstream model.
+When redaction occurs, the original unredacted text is intentionally not
+persisted in Gate's request audit record.
+
 LLM07 detection currently redacts configured leak patterns from completed
 non-streaming responses before they are returned. Streaming responses are
 audited for those leaks only after the stream finishes; tokens already sent to

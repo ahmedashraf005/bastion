@@ -19,6 +19,8 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
+from detectors.base import DetectorSignal
+from detectors.presidio_pii import PresidioPiiDetector
 from detectors.prompt_guard import PromptGuardDetector
 from detectors.system_prompt_leak import SystemPromptLeakDetector
 from policy.engine import PolicyEngine
@@ -33,6 +35,9 @@ logger = logging.getLogger("bastion.gate")
 RULES_PATH = Path(__file__).resolve().parent.parent / "policy" / "rules.yaml"
 LEAK_PATTERNS_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "leak_patterns.yaml"
+)
+PII_ENTITIES_PATH = (
+    Path(__file__).resolve().parent.parent / "detectors" / "pii_entities.yaml"
 )
 
 requests_table = Table(
@@ -162,6 +167,23 @@ def merge_matched_rules(*rule_groups: list[str]) -> list[str] | None:
     return merged or None
 
 
+def most_recent_user_message(body: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the latest string-content user message for input-side redaction."""
+
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    for message in reversed(messages):
+        if (
+            isinstance(message, dict)
+            and message.get("role") == "user"
+            and isinstance(message.get("content"), str)
+        ):
+            return message
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create Gate's process-lifetime infrastructure and defensive components."""
@@ -172,6 +194,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.system_prompt_leak_detector = SystemPromptLeakDetector.from_yaml(
             LEAK_PATTERNS_PATH
         )
+        app.state.presidio_pii_detector = PresidioPiiDetector.from_yaml(
+            PII_ENTITIES_PATH
+        )
+        app.state.presidio_analyzer = app.state.presidio_pii_detector.analyzer
+        app.state.presidio_anonymizer = app.state.presidio_pii_detector.anonymizer
         if not settings.hf_token:
             raise RuntimeError(
                 "HF_TOKEN is required to download the gated Prompt Guard 2 model; "
@@ -397,6 +424,13 @@ async def chat_completions(request: Request) -> Response:
     stream_requested = body.get("stream") is True
     started_at = perf_counter()
 
+    latest_user_message = most_recent_user_message(body)
+    if latest_user_message is None:
+        pii_signal = DetectorSignal(detector="presidio_pii")
+    else:
+        pii_detector: PresidioPiiDetector = request.app.state.presidio_pii_detector
+        pii_signal = await pii_detector.scan(latest_user_message["content"])
+
     user_content = "\n".join(
         message["content"]
         for message in body.get("messages", [])
@@ -406,9 +440,14 @@ async def chat_completions(request: Request) -> Response:
     )
     prompt_guard_detector: PromptGuardDetector = request.app.state.prompt_guard_detector
     detector_signal = await prompt_guard_detector.scan(user_content)
-    detector_signals = [detector_signal.model_dump(mode="json")]
+    detector_signals = [
+        detector_signal.model_dump(mode="json"),
+        pii_signal.model_dump(mode="json"),
+    ]
     policy_engine: PolicyEngine = request.app.state.policy_engine
-    policy_result = policy_engine.evaluate([detector_signal], stage="input")
+    policy_result = policy_engine.evaluate(
+        [detector_signal, pii_signal], stage="input"
+    )
     matched_rules = policy_result.matched_rules or None
 
     if policy_result.action == "block":
@@ -442,6 +481,19 @@ async def chat_completions(request: Request) -> Response:
             detector_signals=detector_signals,
         )
         return response
+
+    pii_redaction_match = next(
+        (
+            match
+            for match in policy_result.matches
+            if match.action == "redact"
+            and match.signal.detector == "presidio_pii"
+            and match.signal.redacted_content is not None
+        ),
+        None,
+    )
+    if pii_redaction_match is not None and latest_user_message is not None:
+        latest_user_message["content"] = pii_redaction_match.signal.redacted_content
 
     if stream_requested:
         client = httpx.AsyncClient(
@@ -638,7 +690,7 @@ async def chat_completions(request: Request) -> Response:
         upstream_status=response.status_code,
         latency_ms=latency_ms,
         error=error,
-        policy_action=output_evaluation.action,
+        policy_action=output_evaluation.action or policy_result.action,
         matched_rules=merged_matched_rules,
         detector_signals=merged_detector_signals,
     )

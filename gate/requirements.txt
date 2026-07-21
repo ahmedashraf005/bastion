@@ -9,3 +9,6 @@ asyncpg
 transformers
 torch
 pyyaml
+presidio-analyzer
+presidio-anonymizer
+spacy
