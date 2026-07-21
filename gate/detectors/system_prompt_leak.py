@@ -67,7 +67,7 @@ class SystemPromptLeakDetector:
         normalized_characters: list[str] = []
         index_map: list[int] = []
         for original_index, character in enumerate(content):
-            if character in cls._separator_characters:
+            if character in cls._separator_characters or character.isspace():
                 continue
             normalized_characters.append(character)
             index_map.append(original_index)

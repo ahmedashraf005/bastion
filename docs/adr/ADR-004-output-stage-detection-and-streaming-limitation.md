@@ -38,6 +38,6 @@ streamed leak is persisted verbatim in `gate.requests`; operators must
 therefore treat the audit table as potentially containing leaked material and
 apply appropriate retention and access controls in real deployments.
 
-The leak detector can optionally normalize spaces, tabs, newlines, carriage returns, hyphens, underscores, and periods before matching, closing the separator-reformatting evasion found by Bastion.Strike's campaign against this detector using the same normalization technique Strike used to identify it.
+The leak detector can optionally normalize the original curated separator set (spaces, tabs, newlines, carriage returns, hyphens, underscores, and periods) plus any Unicode whitespace character for which Python's `str.isspace()` returns true before matching, closing the separator-reformatting evasion found by Bastion.Strike's campaign against this detector and the specific non-breaking-space gap found during its remediation.
 
-Unicode non-breaking spaces (U+00A0), and likely other Unicode whitespace or separator variants, remain outside the current `strip_separators` character set and were observed to evade redaction during testing; expanding that set is a known follow-up requiring a separate scoped decision about boundaries such as Unicode whitespace, punctuation, and homoglyphs rather than silent scope creep here.
+Zero-width characters, additional punctuation normalization, and homoglyph normalization remain explicitly out of scope; they are distinct future decisions and are not solved by this Unicode-whitespace change.

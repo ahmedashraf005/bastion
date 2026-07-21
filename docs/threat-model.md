@@ -29,10 +29,12 @@ persisted in Gate's request audit record.
 
 LLM07 detection currently redacts configured leak patterns from completed
 non-streaming responses before they are returned. Patterns configured for
-separator normalization also catch secrets reformatted with spaces, hyphens,
-underscores, or periods. Streaming responses are audited for those leaks only
-after the stream finishes; tokens already sent to the client cannot be
-retracted, so streaming is not yet protected from a leak.
+separator normalization also catch secrets reformatted with the original
+curated separators and Unicode whitespace generally. Invisible zero-width
+characters and homoglyphs remain known, distinct gaps outside this change.
+Streaming responses are audited for those leaks only after the stream
+finishes; tokens already sent to the client cannot be retracted, so streaming
+is not yet protected from a leak.
 
 ## Red-team operating boundary
 
