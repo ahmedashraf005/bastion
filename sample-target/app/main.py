@@ -153,4 +153,10 @@ async def chat(request: Request) -> Response:
             content={"error": "Gate returned an invalid completion response"},
         )
 
-    return JSONResponse(status_code=200, content={"reply": reply})
+    return JSONResponse(
+        status_code=200,
+        content={
+            "reply": reply,
+            "gate_request_id": gate_response.headers.get("X-Bastion-Request-Id"),
+        },
+    )
