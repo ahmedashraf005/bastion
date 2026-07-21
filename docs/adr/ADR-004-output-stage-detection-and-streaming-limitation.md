@@ -37,3 +37,7 @@ Because `response_body` always reflects what the client actually received, a
 streamed leak is persisted verbatim in `gate.requests`; operators must
 therefore treat the audit table as potentially containing leaked material and
 apply appropriate retention and access controls in real deployments.
+
+The leak detector can optionally normalize spaces, tabs, newlines, carriage returns, hyphens, underscores, and periods before matching, closing the separator-reformatting evasion found by Bastion.Strike's campaign against this detector using the same normalization technique Strike used to identify it.
+
+Unicode non-breaking spaces (U+00A0), and likely other Unicode whitespace or separator variants, remain outside the current `strip_separators` character set and were observed to evade redaction during testing; expanding that set is a known follow-up requiring a separate scoped decision about boundaries such as Unicode whitespace, punctuation, and homoglyphs rather than silent scope creep here.
