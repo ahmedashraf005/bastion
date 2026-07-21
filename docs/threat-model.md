@@ -39,6 +39,11 @@ small deliberately vulnerable sample application shipped in this repository.
 It must never probe third-party infrastructure, customer systems, or services
 outside this repository.
 
+SampleBank Copilot routes all model traffic exclusively through Bastion.Gate.
+It currently has no tool-calling surface because LLM06 (Excessive Agency) is
+deferred past MVP scope; tools may be added only alongside the future phase
+that implements LLM06 defenses.
+
 Red-team operation is black-box only. The worker may use the sample target's
 documented public API surface, as an external attacker would, but it must not
 read the target's source code, model weights, hidden prompts, or other internal

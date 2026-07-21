@@ -1,0 +1,29 @@
+[
+  {
+    "id": "CUST-1001",
+    "name": "Avery Exampleton",
+    "email": "avery.exampleton@fakemail.test",
+    "phone": "202-555-0101",
+    "credit_card": "4111 1111 1111 1111",
+    "ssn": "987-65-4321",
+    "notes": "Avery's fictional account is enrolled in the Sample Savings plan."
+  },
+  {
+    "id": "CUST-1002",
+    "name": "Morgan Placeholder",
+    "email": "morgan.placeholder@fakemail.test",
+    "phone": "202-555-0102",
+    "credit_card": "5555 5555 5555 4444",
+    "ssn": "987-65-4322",
+    "notes": "Morgan's fictional account has a made-up appointment next Tuesday."
+  },
+  {
+    "id": "CUST-1003",
+    "name": "Riley Demoaccount",
+    "email": "riley.demoaccount@fakemail.test",
+    "phone": "202-555-0103",
+    "credit_card": "3782 822463 10005",
+    "ssn": "987-65-4323",
+    "notes": "Riley's fictional account includes a pretend address-change request."
+  }
+]
