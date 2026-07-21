@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node.js
+node_modules/
+dist/
+.pnpm-store/
+
+# .NET
+bin/
+obj/
+
+# Local environment configuration
+.env
+
+# OS and editor files
+.DS_Store
+.vscode/
+.idea/
