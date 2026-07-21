@@ -1,8 +1,8 @@
 # Bastion.Gate
 
-Bastion.Gate is the FastAPI data-plane service for Bastion. In this first
-slice, it is a transparent, non-streaming OpenAI-compatible passthrough to a
-local Ollama instance.
+Bastion.Gate is the FastAPI data-plane service for Bastion. It is a
+transparent OpenAI-compatible passthrough to a local Ollama instance,
+supporting both JSON and SSE chat-completion responses.
 
 Start Postgres from the repository root, then from inside `gate/`, create and
 activate a virtual environment, install the dependencies, apply the Gate-owned
@@ -26,8 +26,10 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model":"<installed-model>","messages":[{"role":"user","content":"Hello"}],"stream":false}'
 ```
 
+Use `"stream": true` for an SSE response. Gate relays Ollama's event bytes
+without reformatting them while reconstructing the assistant content for the
+audit record after the stream ends.
+
 Each request is persisted best-effort in the Gate-owned `gate.requests` audit
 table. A database write failure is logged but does not prevent the proxy from
-returning its already-prepared response. Streaming and detection are not yet
-implemented. A request with `"stream": true` is deliberately rejected with
-HTTP 501 rather than being silently converted into a non-streaming response.
+returning its already-prepared response. Detection is not implemented yet.

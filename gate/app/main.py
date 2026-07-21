@@ -1,7 +1,10 @@
 """Transparent, non-streaming OpenAI-compatible proxy for Ollama."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+import json
 import logging
 from time import perf_counter
 from typing import Any
@@ -9,7 +12,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, insert
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -36,6 +39,89 @@ requests_table = Table(
     Column("error", Text, nullable=True),
     schema="gate",
 )
+
+
+@dataclass
+class StreamAccumulator:
+    """Reconstruct an OpenAI-compatible completion from SSE delta chunks."""
+
+    request_model: str
+    stream_id: str | None = None
+    model: str | None = None
+    content_parts: list[str] = field(default_factory=list)
+    finish_reason: str | None = None
+    usage: Any | None = None
+    usage_seen: bool = False
+    terminal_seen: bool = False
+
+    def consume_sse_line(self, line: bytes) -> None:
+        """Parse one complete SSE data line without altering relayed bytes."""
+
+        if not line.startswith(b"data:"):
+            return
+
+        payload = line[5:].lstrip()
+        if payload == b"[DONE]":
+            self.terminal_seen = True
+            return
+
+        try:
+            chunk = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+
+        if not isinstance(chunk, dict):
+            return
+
+        chunk_id = chunk.get("id")
+        if isinstance(chunk_id, str):
+            self.stream_id = chunk_id
+
+        chunk_model = chunk.get("model")
+        if isinstance(chunk_model, str):
+            self.model = chunk_model
+
+        if chunk.get("usage") is not None:
+            self.usage = chunk["usage"]
+            self.usage_seen = True
+
+        choices = chunk.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return
+
+        choice = choices[0]
+        if not isinstance(choice, dict):
+            return
+
+        delta = choice.get("delta")
+        if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+            self.content_parts.append(delta["content"])
+
+        if choice.get("finish_reason") is not None:
+            self.finish_reason = str(choice["finish_reason"])
+            self.terminal_seen = True
+
+    def response_body(self) -> dict[str, Any]:
+        """Build the persisted non-streaming-shaped response body."""
+
+        response_body: dict[str, Any] = {
+            "id": self.stream_id,
+            "object": "chat.completion",
+            "model": self.model or self.request_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "".join(self.content_parts),
+                    },
+                    "finish_reason": self.finish_reason,
+                }
+            ],
+        }
+        if self.usage_seen:
+            response_body["usage"] = self.usage
+        return response_body
 
 
 @asynccontextmanager
@@ -85,6 +171,118 @@ async def persist_request(
         logger.exception("persistence_failed request_id=%s", request_id)
 
 
+async def relay_stream(
+    request: Request,
+    *,
+    client: httpx.AsyncClient,
+    upstream_response: httpx.Response,
+    request_id: UUID,
+    model: str,
+    request_body: dict[str, Any],
+    started_at: float,
+) -> AsyncIterator[bytes]:
+    """Relay upstream SSE bytes and persist one audit row when the stream ends."""
+
+    accumulator = StreamAccumulator(request_model=model)
+    line_buffer = bytearray()
+    client_disconnected = False
+    upstream_error: str | None = None
+    cancellation: asyncio.CancelledError | None = None
+
+    try:
+        raw_chunks = upstream_response.aiter_raw()
+        while True:
+            if await request.is_disconnected():
+                client_disconnected = True
+                break
+
+            try:
+                raw_chunk = await anext(raw_chunks)
+            except StopAsyncIteration:
+                break
+
+            line_buffer.extend(raw_chunk)
+            while b"\n" in line_buffer:
+                newline_index = line_buffer.index(b"\n")
+                line = bytes(line_buffer[:newline_index]).rstrip(b"\r")
+                del line_buffer[: newline_index + 1]
+                accumulator.consume_sse_line(line)
+
+            yield raw_chunk
+    except asyncio.CancelledError as exc:
+        client_disconnected = True
+        cancellation = exc
+    except GeneratorExit:
+        client_disconnected = True
+        raise
+    except httpx.HTTPError as exc:
+        upstream_error = f"upstream stream interrupted: {exc.__class__.__name__}: {exc}"
+    finally:
+        if line_buffer:
+            accumulator.consume_sse_line(bytes(line_buffer).rstrip(b"\r"))
+
+        await upstream_response.aclose()
+        await client.aclose()
+
+        latency_ms = (perf_counter() - started_at) * 1000
+        if client_disconnected:
+            error = "client disconnected mid-stream"
+            logger.info(
+                "stream_client_disconnected request_id=%s model=%s latency_ms=%.2f",
+                request_id,
+                model,
+                latency_ms,
+            )
+        elif upstream_error is not None:
+            error = upstream_error
+            logger.info(
+                "stream_failed request_id=%s model=%s latency_ms=%.2f error=%s",
+                request_id,
+                model,
+                latency_ms,
+                error,
+            )
+        elif accumulator.terminal_seen:
+            error = None
+            logger.info(
+                "stream_completed request_id=%s model=%s latency_ms=%.2f upstream_status=%s",
+                request_id,
+                model,
+                latency_ms,
+                upstream_response.status_code,
+            )
+        else:
+            error = "upstream stream interrupted: ended before a terminal event"
+            logger.info(
+                "stream_failed request_id=%s model=%s latency_ms=%.2f error=%s",
+                request_id,
+                model,
+                latency_ms,
+                error,
+            )
+
+        persistence_arguments = {
+            "request_id": request_id,
+            "model": model,
+            "stream_requested": True,
+            "request_body": request_body,
+            "response_body": accumulator.response_body(),
+            "upstream_status": upstream_response.status_code,
+            "latency_ms": latency_ms,
+            "error": error,
+        }
+        if cancellation is not None:
+            asyncio.create_task(
+                persist_request(request, **persistence_arguments),
+                name=f"persist-stream-{request_id}",
+            )
+        else:
+            await persist_request(request, **persistence_arguments)
+
+    if cancellation is not None:
+        raise cancellation
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     """Return a basic liveness response without contacting the upstream."""
@@ -110,32 +308,59 @@ async def chat_completions(request: Request) -> Response:
     started_at = perf_counter()
 
     if stream_requested:
-        latency_ms = (perf_counter() - started_at) * 1000
-        error = "streaming not yet supported in this build"
-        response = JSONResponse(
-            status_code=501,
-            content={"error": error},
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(settings.ollama_timeout_seconds)
+        )
+        try:
+            upstream_request = client.build_request(
+                "POST",
+                f"{settings.ollama_base_url}/v1/chat/completions",
+                json=body,
+            )
+            upstream_response = await client.send(upstream_request, stream=True)
+        except httpx.RequestError as exc:
+            await client.aclose()
+            latency_ms = (perf_counter() - started_at) * 1000
+            error = f"upstream Ollama request failed ({exc.__class__.__name__}): {exc}"
+            response = JSONResponse(
+                status_code=502,
+                content={"error": "upstream Ollama request failed"},
+                headers={"X-Bastion-Request-Id": str(request_id)},
+            )
+            logger.info(
+                "request_failed request_id=%s model=%s latency_ms=%.2f upstream_status=%s",
+                request_id,
+                requested_model,
+                latency_ms,
+                response.status_code,
+            )
+            await persist_request(
+                request,
+                request_id=request_id,
+                model=model,
+                stream_requested=True,
+                request_body=body,
+                response_body=None,
+                upstream_status=response.status_code,
+                latency_ms=latency_ms,
+                error=error,
+            )
+            return response
+
+        return StreamingResponse(
+            relay_stream(
+                request,
+                client=client,
+                upstream_response=upstream_response,
+                request_id=request_id,
+                model=model,
+                request_body=body,
+                started_at=started_at,
+            ),
+            status_code=upstream_response.status_code,
+            media_type="text/event-stream",
             headers={"X-Bastion-Request-Id": str(request_id)},
         )
-        logger.info(
-            "request_rejected request_id=%s model=%s latency_ms=%.2f upstream_status=%s",
-            request_id,
-            requested_model,
-            latency_ms,
-            "not_called",
-        )
-        await persist_request(
-            request,
-            request_id=request_id,
-            model=model,
-            stream_requested=stream_requested,
-            request_body=body,
-            response_body=None,
-            upstream_status=response.status_code,
-            latency_ms=latency_ms,
-            error=error,
-        )
-        return response
 
     try:
         async with httpx.AsyncClient(
