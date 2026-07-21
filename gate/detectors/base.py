@@ -13,6 +13,7 @@ class DetectorSignal(BaseModel):
     entities: list[str] | None = None
     matched: bool | None = None
     redacted_content: str | None = None
+    matched_pattern_ids: list[str] | None = None
 
 
 class Detector(Protocol):

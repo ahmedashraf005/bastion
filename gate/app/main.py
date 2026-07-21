@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
 from detectors.prompt_guard import PromptGuardDetector
+from detectors.system_prompt_leak import SystemPromptLeakDetector
 from policy.engine import PolicyEngine
 
 
@@ -30,6 +31,9 @@ logging.basicConfig(
 logger = logging.getLogger("bastion.gate")
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "policy" / "rules.yaml"
+LEAK_PATTERNS_PATH = (
+    Path(__file__).resolve().parent.parent / "detectors" / "leak_patterns.yaml"
+)
 
 requests_table = Table(
     "requests",
@@ -132,6 +136,32 @@ class StreamAccumulator:
         return response_body
 
 
+def first_assistant_message(response_body: Any) -> dict[str, Any] | None:
+    """Return the first assistant message from an OpenAI-compatible response."""
+
+    if not isinstance(response_body, dict):
+        return None
+    choices = response_body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return None
+    message = choice.get("message")
+    return message if isinstance(message, dict) else None
+
+
+def merge_matched_rules(*rule_groups: list[str]) -> list[str] | None:
+    """Merge stage results in order while retaining each rule ID once."""
+
+    merged: list[str] = []
+    for rule_group in rule_groups:
+        for rule_id in rule_group:
+            if rule_id not in merged:
+                merged.append(rule_id)
+    return merged or None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create Gate's process-lifetime infrastructure and defensive components."""
@@ -139,6 +169,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.database_engine = create_async_engine(settings.database_url)
     try:
         app.state.policy_engine = PolicyEngine.from_yaml(RULES_PATH)
+        app.state.system_prompt_leak_detector = SystemPromptLeakDetector.from_yaml(
+            LEAK_PATTERNS_PATH
+        )
         if not settings.hf_token:
             raise RuntimeError(
                 "HF_TOKEN is required to download the gated Prompt Guard 2 model; "
@@ -285,18 +318,48 @@ async def relay_stream(
                 error,
             )
 
+        response_body = accumulator.response_body()
+        persisted_policy_action = policy_action
+        persisted_matched_rules = matched_rules
+        persisted_detector_signals = detector_signals
+
+        if accumulator.terminal_seen:
+            message = first_assistant_message(response_body)
+            assistant_content = (
+                message.get("content") if isinstance(message, dict) else ""
+            )
+            if not isinstance(assistant_content, str):
+                assistant_content = ""
+
+            leak_detector: SystemPromptLeakDetector = (
+                request.app.state.system_prompt_leak_detector
+            )
+            output_signal = await leak_detector.scan(assistant_content)
+            policy_engine: PolicyEngine = request.app.state.policy_engine
+            output_evaluation = policy_engine.evaluate(
+                [output_signal], stage="output"
+            )
+            persisted_matched_rules = merge_matched_rules(
+                matched_rules or [], output_evaluation.matched_rules
+            )
+            persisted_detector_signals = detector_signals + [
+                output_signal.model_dump(mode="json")
+            ]
+            if output_evaluation.matched_rules:
+                persisted_policy_action = "detected_after_stream"
+
         persistence_arguments = {
             "request_id": request_id,
             "model": model,
             "stream_requested": True,
             "request_body": request_body,
-            "response_body": accumulator.response_body(),
+            "response_body": response_body,
             "upstream_status": upstream_response.status_code,
             "latency_ms": latency_ms,
             "error": error,
-            "policy_action": policy_action,
-            "matched_rules": matched_rules,
-            "detector_signals": detector_signals,
+            "policy_action": persisted_policy_action,
+            "matched_rules": persisted_matched_rules,
+            "detector_signals": persisted_detector_signals,
         }
         if cancellation is not None:
             asyncio.create_task(
@@ -345,7 +408,7 @@ async def chat_completions(request: Request) -> Response:
     detector_signal = await prompt_guard_detector.scan(user_content)
     detector_signals = [detector_signal.model_dump(mode="json")]
     policy_engine: PolicyEngine = request.app.state.policy_engine
-    policy_result = policy_engine.evaluate([detector_signal])
+    policy_result = policy_engine.evaluate([detector_signal], stage="input")
     matched_rules = policy_result.matched_rules or None
 
     if policy_result.action == "block":
@@ -488,16 +551,76 @@ async def chat_completions(request: Request) -> Response:
         response_body = None
         error = "upstream response was not valid JSON"
 
-    response = Response(
-        content=upstream_response.content,
-        status_code=upstream_response.status_code,
-        headers={
-            "Content-Type": upstream_response.headers.get(
-                "content-type", "application/json"
-            ),
-            "X-Bastion-Request-Id": str(request_id),
-        },
+    message = first_assistant_message(response_body)
+    assistant_content = message.get("content") if message is not None else ""
+    if not isinstance(assistant_content, str):
+        assistant_content = ""
+
+    leak_detector: SystemPromptLeakDetector = request.app.state.system_prompt_leak_detector
+    output_signal = await leak_detector.scan(assistant_content)
+    output_evaluation = policy_engine.evaluate([output_signal], stage="output")
+    merged_matched_rules = merge_matched_rules(
+        policy_result.matched_rules, output_evaluation.matched_rules
     )
+    merged_detector_signals = detector_signals + [output_signal.model_dump(mode="json")]
+
+    if output_evaluation.action == "block":
+        rule_id = output_evaluation.terminal_rule_id
+        response = JSONResponse(
+            status_code=400,
+            content={"error": "blocked by policy", "rule_id": rule_id},
+            headers={"X-Bastion-Request-Id": str(request_id)},
+        )
+        error = f"blocked by policy: {rule_id}"
+        logger.info(
+            "response_blocked request_id=%s model=%s latency_ms=%.2f rule_id=%s",
+            request_id,
+            requested_model,
+            latency_ms,
+            rule_id,
+        )
+        await persist_request(
+            request,
+            request_id=request_id,
+            model=model,
+            stream_requested=False,
+            request_body=body,
+            response_body=None,
+            upstream_status=response.status_code,
+            latency_ms=latency_ms,
+            error=error,
+            policy_action="block",
+            matched_rules=merged_matched_rules,
+            detector_signals=merged_detector_signals,
+        )
+        return response
+
+    redaction_match = next(
+        (
+            match
+            for match in output_evaluation.matches
+            if match.action == "redact" and match.signal.redacted_content is not None
+        ),
+        None,
+    )
+    if redaction_match is not None and message is not None:
+        message["content"] = redaction_match.signal.redacted_content
+        response = JSONResponse(
+            content=response_body,
+            status_code=upstream_response.status_code,
+            headers={"X-Bastion-Request-Id": str(request_id)},
+        )
+    else:
+        response = Response(
+            content=upstream_response.content,
+            status_code=upstream_response.status_code,
+            headers={
+                "Content-Type": upstream_response.headers.get(
+                    "content-type", "application/json"
+                ),
+                "X-Bastion-Request-Id": str(request_id),
+            },
+        )
     logger.info(
         "request_completed request_id=%s model=%s latency_ms=%.2f upstream_status=%s",
         request_id,
@@ -515,8 +638,8 @@ async def chat_completions(request: Request) -> Response:
         upstream_status=response.status_code,
         latency_ms=latency_ms,
         error=error,
-        policy_action=policy_result.action,
-        matched_rules=matched_rules,
-        detector_signals=detector_signals,
+        policy_action=output_evaluation.action,
+        matched_rules=merged_matched_rules,
+        detector_signals=merged_detector_signals,
     )
     return response

@@ -1,6 +1,7 @@
 - id: block-high-confidence-injection
   owasp_id: LLM01
   enabled: true
+  stage: input
   detector: prompt_guard_2
   matcher_type: threshold
   matcher_config:
@@ -8,3 +9,13 @@
     threshold: 0.8
     comparison: gte
   action: block
+
+- id: redact-system-prompt-leak
+  owasp_id: LLM07
+  enabled: true
+  stage: output
+  detector: system_prompt_leak
+  matcher_type: boolean_true
+  matcher_config:
+    signal_field: matched
+  action: redact

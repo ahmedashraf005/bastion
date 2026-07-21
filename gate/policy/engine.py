@@ -8,7 +8,13 @@ import yaml
 from pydantic import TypeAdapter
 
 from detectors.base import DetectorSignal
-from policy.models import PolicyEvaluation, PolicyRule
+from policy.models import (
+    PolicyAction,
+    PolicyEvaluation,
+    PolicyRule,
+    PolicyStage,
+    RuleMatch,
+)
 
 
 COMPARISONS: dict[str, Callable[[float, float], bool]] = {
@@ -36,46 +42,59 @@ class PolicyEngine:
         rules = TypeAdapter(list[PolicyRule]).validate_python(raw_rules)
         return cls(rules)
 
-    def evaluate(self, signals: list[DetectorSignal]) -> PolicyEvaluation:
-        """Return the first terminal action and all ordered rule matches."""
+    def evaluate(
+        self, signals: list[DetectorSignal], *, stage: PolicyStage
+    ) -> PolicyEvaluation:
+        """Return the stage-specific terminal action and ordered rule matches."""
 
         matched_rules: list[str] = []
-        non_terminal_action: str | None = None
+        matches: list[RuleMatch] = []
+        non_terminal_action: PolicyAction | None = None
 
         for rule in self._rules:
-            if not rule.enabled:
+            if not rule.enabled or rule.stage != stage:
                 continue
 
             matching_signals = [
                 signal for signal in signals if signal.detector == rule.detector
             ]
-            if not any(self._matches(rule, signal) for signal in matching_signals):
+            matched_signals = [
+                signal for signal in matching_signals if self._matches(rule, signal)
+            ]
+            if not matched_signals:
                 continue
 
             matched_rules.append(rule.id)
+            matches.extend(
+                RuleMatch(rule_id=rule.id, action=rule.action, signal=signal)
+                for signal in matched_signals
+            )
             if rule.action in {"block", "allow"}:
                 return PolicyEvaluation(
                     action=rule.action,
                     matched_rules=matched_rules,
+                    matches=matches,
                     terminal_rule_id=rule.id,
                     signals=signals,
                 )
 
-            # Content mutation for redact arrives with the future Presidio phase.
             non_terminal_action = rule.action
 
         return PolicyEvaluation(
             action=non_terminal_action,
             matched_rules=matched_rules,
+            matches=matches,
             signals=signals,
         )
 
     @staticmethod
     def _matches(rule: PolicyRule, signal: DetectorSignal) -> bool:
-        if rule.matcher_type != "threshold":
-            raise ValueError(f"unsupported matcher_type: {rule.matcher_type}")
+        if rule.matcher_type == "threshold":
+            return PolicyEngine._matches_threshold(rule.matcher_config, signal)
+        if rule.matcher_type == "boolean_true":
+            return PolicyEngine._matches_boolean_true(rule.matcher_config, signal)
 
-        return PolicyEngine._matches_threshold(rule.matcher_config, signal)
+        raise ValueError(f"unsupported matcher_type: {rule.matcher_type}")
 
     @staticmethod
     def _matches_threshold(
@@ -96,3 +115,14 @@ class PolicyEngine:
             return False
 
         return comparison(float(signal_value), threshold)
+
+    @staticmethod
+    def _matches_boolean_true(
+        matcher_config: dict[str, Any], signal: DetectorSignal
+    ) -> bool:
+        try:
+            signal_field = matcher_config["signal_field"]
+        except (KeyError, TypeError) as exc:
+            raise ValueError("invalid boolean_true matcher configuration") from exc
+
+        return getattr(signal, signal_field, None) is True

@@ -23,6 +23,11 @@ is intentionally designed, implemented, and tested.
 | LLM08 | Vector & Embedding Weaknesses | No (later) |
 | LLM10 | Unbounded Consumption | Yes |
 
+LLM07 detection currently redacts configured leak patterns from completed
+non-streaming responses before they are returned. Streaming responses are
+audited for those leaks only after the stream finishes; tokens already sent to
+the client cannot be retracted, so streaming is not yet protected from a leak.
+
 ## Red-team operating boundary
 
 Any future Bastion.Strike component may attack only SampleBank Copilot, the
