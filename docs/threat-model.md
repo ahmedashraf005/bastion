@@ -45,6 +45,9 @@ outside this repository.
 The strategy library can influence only Strike's own candidate generation
 against that bundled target; it never reads, writes, or changes Gate policy,
 which remains the future Rule Synthesizer's human-reviewed responsibility.
+The Rule Synthesizer proposes narrow signatures mechanically verified against
+confirmed bypass evidence. A human must approve a proposal before it is applied
+to Gate's live configuration; it does not attempt general root-cause fixes.
 Branching campaigns preserve this same boundary: the reviewed allowlist is
 checked before any generation, pruning, database write, or target request,
 regardless of attempt source.

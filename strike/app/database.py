@@ -54,6 +54,34 @@ findings = sa.Table(
     ),
 )
 
+proposed_rules = sa.Table(
+    "proposed_rules",
+    metadata,
+    sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "finding_id",
+        postgresql.UUID(as_uuid=True),
+        sa.ForeignKey("strike.findings.id"),
+        nullable=False,
+    ),
+    sa.Column("proposed_id", sa.Text(), nullable=False),
+    sa.Column("proposed_pattern", sa.Text(), nullable=False),
+    sa.Column("proposed_pattern_type", sa.Text(), nullable=False),
+    sa.Column("proposed_normalize", sa.Text(), nullable=False),
+    sa.Column("proposed_description", sa.Text(), nullable=False),
+    sa.Column("verification_passed", sa.Boolean(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("reviewer_note", sa.Text(), nullable=True),
+    sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("applied_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column(
+        "created_at",
+        sa.DateTime(timezone=True),
+        server_default=sa.text("now()"),
+        nullable=False,
+    ),
+)
+
 attempts = sa.Table(
     "attempts",
     metadata,
@@ -103,5 +131,11 @@ def new_finding_id() -> uuid.UUID:
 
 def new_attempt_id() -> uuid.UUID:
     """Create an attempt identifier before its insert."""
+
+    return uuid.uuid4()
+
+
+def new_proposed_rule_id() -> uuid.UUID:
+    """Create an identifier for a human-reviewable synthesized rule."""
 
     return uuid.uuid4()

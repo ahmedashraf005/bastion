@@ -8,7 +8,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, TypeAdapter
 
-from detectors.base import DetectorSignal
+from .base import DetectorSignal
 
 
 class LeakPattern(BaseModel):
@@ -46,6 +46,14 @@ class SystemPromptLeakDetector:
             raw_patterns = yaml.safe_load(patterns_file)
 
         definitions = TypeAdapter(list[LeakPattern]).validate_python(raw_patterns)
+        return cls.from_definitions(definitions)
+
+    @classmethod
+    def from_definitions(
+        cls, definitions: list[LeakPattern]
+    ) -> "SystemPromptLeakDetector":
+        """Build a detector from validated definitions using Gate's live matcher logic."""
+
         patterns = [
             CompiledLeakPattern(
                 definition=definition,

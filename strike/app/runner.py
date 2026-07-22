@@ -32,9 +32,12 @@ from .database import (
     new_attempt_id,
     new_campaign_id,
     new_finding_id,
+    new_proposed_rule_id,
+    proposed_rules,
 )
 from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
 from strike.planner.strategy_library import StrategyLibrary
+from strike.synthesizer.rule_synthesizer import FindingEvidence, RuleSynthesizer
 
 
 class AttemptsFile(BaseModel):
@@ -170,6 +173,80 @@ def parse_gate_request_id(response_body: object) -> uuid.UUID | None:
         return None
 
 
+def _leak_pattern_ids() -> set[str]:
+    """Read Gate's current detector IDs before assigning a new proposal slug."""
+
+    patterns_path = Path(__file__).resolve().parents[2] / "gate/detectors/leak_patterns.yaml"
+    with patterns_path.open(encoding="utf-8") as patterns_file:
+        raw_patterns = yaml.safe_load(patterns_file) or []
+    return {
+        entry["id"]
+        for entry in raw_patterns
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+    }
+
+
+def _slug_base(description: str) -> str:
+    """Make a short, stable human-review identifier from a proposal description."""
+
+    words = re.findall(r"[a-z0-9]+", description.lower())[:6]
+    return "synthesized-" + ("-".join(words) if words else "leak-pattern")
+
+
+async def synthesize_proposed_rule(
+    connection: AsyncConnection,
+    synthesizer: RuleSynthesizer,
+    *,
+    finding_id: uuid.UUID,
+    attack_turns: list[dict[str, str]],
+    target_reply: str,
+) -> None:
+    """Best-effort synthesis after a persisted adaptive finding; never change its outcome."""
+
+    try:
+        proposal = await synthesizer.propose(
+            FindingEvidence(
+                finding_id=str(finding_id),
+                attack_turns=attack_turns,
+                target_reply=target_reply,
+            )
+        )
+        if proposal is None:
+            print(f"rule_synthesizer_no_proposal finding_id={finding_id}")
+            return
+
+        used_ids = _leak_pattern_ids()
+        existing_result = await connection.execute(sa.select(proposed_rules.c.proposed_id))
+        used_ids.update(existing_result.scalars())
+        base = _slug_base(proposal.description)
+        proposed_id = base
+        suffix = 2
+        while proposed_id in used_ids:
+            proposed_id = f"{base}-{suffix}"
+            suffix += 1
+
+        await connection.execute(
+            sa.insert(proposed_rules).values(
+                id=new_proposed_rule_id(),
+                finding_id=finding_id,
+                proposed_id=proposed_id,
+                proposed_pattern=proposal.pattern,
+                proposed_pattern_type=proposal.pattern_type,
+                proposed_normalize=proposal.normalize,
+                proposed_description=proposal.description,
+                verification_passed=True,
+                status="pending_review",
+            )
+        )
+        await connection.commit()
+        print(
+            "rule_synthesizer_proposed"
+            f" finding_id={finding_id} proposed_id={proposed_id}"
+        )
+    except Exception as exc:
+        print(f"rule_synthesizer_failed finding_id={finding_id} error={exc!s}")
+
+
 async def persist_attempt(
     connection: AsyncConnection,
     *,
@@ -242,6 +319,11 @@ async def run_campaign(
     strategy_library: StrategyLibrary | None = None
     retrieved_strategy_ids: list[str] | None = None
     retrieved_strategy_descriptions: list[str] = []
+    rule_synthesizer = RuleSynthesizer(
+        ollama_base_url=settings.ollama_base_url,
+        model="llama3.1:8b",
+        request_timeout_seconds=settings.request_timeout_seconds,
+    )
     if attempts_file.use_strategy_library:
         valkey_client = redis.from_url(settings.valkey_url, decode_responses=True)
         strategy_library = StrategyLibrary(
@@ -439,6 +521,18 @@ async def run_campaign(
                                             "strategy_library_promotion_reference_failed"
                                             f" campaign_id={campaign_id} finding_id={finding_id} error={exc!s}"
                                         )
+                            await synthesize_proposed_rule(
+                                connection,
+                                rule_synthesizer,
+                                finding_id=finding_id,
+                                attack_turns=[
+                                    {
+                                        "role": "user",
+                                        "content": matched_outcome.planner_attempt.user_message,
+                                    }
+                                ],
+                                target_reply=matched_outcome.target_reply or "",
+                            )
                             break
                         continue
 
@@ -590,9 +684,10 @@ async def run_campaign(
                         )
                         continue
 
+                    finding_id = new_finding_id()
                     await connection.execute(
                         sa.insert(findings).values(
-                            id=new_finding_id(),
+                            id=finding_id,
                             campaign_id=campaign_id,
                             owasp_id=attempts_file.owasp_id,
                             attack_turns=turns,
@@ -610,6 +705,14 @@ async def run_campaign(
                         ended_at=utc_now(),
                     )
                     terminal_written = True
+                    if attempt_spec.source == "planner":
+                        await synthesize_proposed_rule(
+                            connection,
+                            rule_synthesizer,
+                            finding_id=finding_id,
+                            attack_turns=turns,
+                            target_reply=reply,
+                        )
                     break
 
             if not terminal_written:

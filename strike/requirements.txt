@@ -1,7 +1,8 @@
-sqlalchemy
+sqlalchemy[asyncio]
 alembic
 asyncpg
 pyyaml
 httpx
 pydantic>=2,<3
 redis
+python-dotenv
