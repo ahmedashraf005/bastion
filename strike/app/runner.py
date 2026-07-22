@@ -12,6 +12,7 @@ import httpx
 import sqlalchemy as sa
 import yaml
 from pydantic import BaseModel, model_validator
+from redis import asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from .config import ALLOWED_TARGETS, settings
@@ -33,6 +34,7 @@ from .database import (
     new_finding_id,
 )
 from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
+from strike.planner.strategy_library import StrategyLibrary
 
 
 class AttemptsFile(BaseModel):
@@ -46,6 +48,8 @@ class AttemptsFile(BaseModel):
     attempts: list[StaticAttempt] | None = None
     branching_factor: int | None = None
     beam_width: int | None = None
+    use_strategy_library: bool = False
+    strategy_retrieval_k: int = 3
 
     @model_validator(mode="after")
     def validate_source_configuration(self) -> "AttemptsFile":
@@ -62,6 +66,10 @@ class AttemptsFile(BaseModel):
                 raise ValueError("branching attempt_source requires branching_factor > 0")
             if self.beam_width is None or self.beam_width <= 0:
                 raise ValueError("branching attempt_source requires beam_width > 0")
+        elif self.use_strategy_library:
+            raise ValueError("use_strategy_library is supported only for branching campaigns")
+        if self.use_strategy_library and self.strategy_retrieval_k <= 0:
+            raise ValueError("strategy_retrieval_k must be greater than zero")
         return self
 
 
@@ -99,7 +107,9 @@ def normalize_success_reply(reply: str, normalization: str) -> str:
 
 
 def create_attempt_source(
-    attempts_file: AttemptsFile, success_regex: re.Pattern[str]
+    attempts_file: AttemptsFile,
+    success_regex: re.Pattern[str],
+    retrieved_strategies: list[str] | None = None,
 ) -> AttemptSource | BranchingAttemptSource:
     """Choose the source while retaining one shared campaign execution loop."""
 
@@ -129,6 +139,7 @@ def create_attempt_source(
         normalize_reply=lambda reply: normalize_success_reply(
             reply, attempts_file.success_normalization
         ),
+        retrieved_strategies=retrieved_strategies,
     )
 
 
@@ -176,6 +187,8 @@ async def persist_attempt(
     pruned: bool,
     prune_reason: str | None,
     prune_score: float | None,
+    # Context shown to the planner, not proof that any candidate used it.
+    retrieved_strategy_ids: list[str] | None = None,
 ) -> None:
     """Persist one executed attempt before campaign execution continues."""
 
@@ -196,6 +209,7 @@ async def persist_attempt(
             pruned=pruned,
             prune_reason=prune_reason,
             prune_score=prune_score,
+            retrieved_strategy_ids=retrieved_strategy_ids,
         )
     )
 
@@ -224,7 +238,32 @@ async def run_campaign(
 
     attempts_file = load_attempts(attempts_path)
     success_regex = re.compile(attempts_file.success_pattern)
-    attempt_source = create_attempt_source(attempts_file, success_regex)
+    valkey_client = None
+    strategy_library: StrategyLibrary | None = None
+    retrieved_strategy_ids: list[str] | None = None
+    retrieved_strategy_descriptions: list[str] = []
+    if attempts_file.use_strategy_library:
+        valkey_client = redis.from_url(settings.valkey_url, decode_responses=True)
+        strategy_library = StrategyLibrary(
+            valkey_client,
+            settings.ollama_base_url,
+            settings.embedding_model,
+            request_timeout_seconds=settings.request_timeout_seconds,
+        )
+        retrieved_strategies = await strategy_library.retrieve(
+            attempts_file.objective, attempts_file.strategy_retrieval_k
+        )
+        retrieved_strategy_ids = [strategy.strategy_id for strategy in retrieved_strategies]
+        retrieved_strategy_descriptions = [
+            strategy.description for strategy in retrieved_strategies
+        ]
+        print(
+            "strategy_library_retrieval"
+            f" enabled=true retrieved_strategy_ids={retrieved_strategy_ids}"
+        )
+    attempt_source = create_attempt_source(
+        attempts_file, success_regex, retrieved_strategy_descriptions
+    )
     campaign_id = new_campaign_id()
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     start_monotonic = time.monotonic()
@@ -306,7 +345,7 @@ async def run_campaign(
                                 campaign_id=campaign_id,
                                 sequence_number=sequence_number,
                                 attack_turns=turns,
-                                source="planner",
+                                source="branching",
                                 planner_reasoning=outcome.planner_attempt.reasoning,
                                 target_status=outcome.target_status,
                                 target_error=outcome.target_error,
@@ -317,6 +356,7 @@ async def run_campaign(
                                 pruned=outcome.pruned,
                                 prune_reason=outcome.prune_reason,
                                 prune_score=outcome.prune_score,
+                                retrieved_strategy_ids=retrieved_strategy_ids,
                             )
                             await connection.commit()
                             if outcome.target_status is not None:
@@ -341,9 +381,10 @@ async def run_campaign(
 
                         if round_result.match_outcome is not None:
                             matched_outcome = round_result.match_outcome
+                            finding_id = new_finding_id()
                             await connection.execute(
                                 sa.insert(findings).values(
-                                    id=new_finding_id(),
+                                    id=finding_id,
                                     campaign_id=campaign_id,
                                     owasp_id=attempts_file.owasp_id,
                                     attack_turns=[
@@ -366,6 +407,38 @@ async def run_campaign(
                                 ended_at=utc_now(),
                             )
                             terminal_written = True
+                            if strategy_library is not None:
+                                promoted_strategy_id = await strategy_library.promote(
+                                    campaign_id=str(campaign_id),
+                                    finding_id=str(finding_id),
+                                    objective=attempts_file.objective,
+                                    owasp_id=attempts_file.owasp_id,
+                                    attack_turns=[
+                                        {
+                                            "role": "user",
+                                            "content": matched_outcome.planner_attempt.user_message,
+                                        }
+                                    ],
+                                    target_reply=matched_outcome.target_reply or "",
+                                )
+                                if promoted_strategy_id is None:
+                                    print(
+                                        "strategy_library_promotion_failed"
+                                        f" campaign_id={campaign_id} finding_id={finding_id}"
+                                    )
+                                else:
+                                    try:
+                                        await connection.execute(
+                                            sa.update(findings)
+                                            .where(findings.c.id == finding_id)
+                                            .values(promoted_strategy_id=promoted_strategy_id)
+                                        )
+                                        await connection.commit()
+                                    except Exception as exc:
+                                        print(
+                                            "strategy_library_promotion_reference_failed"
+                                            f" campaign_id={campaign_id} finding_id={finding_id} error={exc!s}"
+                                        )
                             break
                         continue
 
@@ -411,6 +484,7 @@ async def run_campaign(
                             pruned=False,
                             prune_reason=None,
                             prune_score=None,
+                            retrieved_strategy_ids=retrieved_strategy_ids,
                         )
                         await connection.commit()
                         history.append(
@@ -475,6 +549,7 @@ async def run_campaign(
                         pruned=False,
                         prune_reason=None,
                         prune_score=None,
+                        retrieved_strategy_ids=retrieved_strategy_ids,
                     )
 
                     if response.status_code != 200:
@@ -557,6 +632,8 @@ async def run_campaign(
         raise
     finally:
         await engine.dispose()
+        if valkey_client is not None:
+            await valkey_client.aclose()
 
     elapsed_seconds = time.monotonic() - start_monotonic
     print(

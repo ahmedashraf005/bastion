@@ -126,6 +126,7 @@ class BranchingAttemptSource:
         beam_width: int,
         success_regex: re.Pattern[str],
         normalize_reply: Callable[[str], str],
+        retrieved_strategies: list[str] | None = None,
     ) -> None:
         if branching_factor <= 0:
             raise ValueError("branching_factor must be greater than zero")
@@ -138,6 +139,7 @@ class BranchingAttemptSource:
         self._beam_width = beam_width
         self._success_regex = success_regex
         self._normalize_reply = normalize_reply
+        self._retrieved_strategies = retrieved_strategies or []
 
     @staticmethod
     def _parse_gate_request_id(response_body: object) -> uuid.UUID | None:
@@ -165,7 +167,10 @@ class BranchingAttemptSource:
             return RoundResult(outcomes=[], queries_consumed=0, match_outcome=None)
 
         batch = await self._planner.generate_candidate_batch(
-            self._objective, history, self._branching_factor
+            self._objective,
+            history,
+            self._branching_factor,
+            self._retrieved_strategies,
         )
         evaluation = await self._prune_gate.evaluate(self._objective, batch.candidates)
 

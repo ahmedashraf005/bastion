@@ -45,6 +45,7 @@ findings = sa.Table(
     sa.Column("target_reply", sa.Text(), nullable=False),
     sa.Column("matched_pattern", sa.Text(), nullable=False),
     sa.Column("gate_request_id", postgresql.UUID(as_uuid=True), nullable=True),
+    sa.Column("promoted_strategy_id", sa.Text(), nullable=True),
     sa.Column(
         "found_at",
         sa.DateTime(timezone=True),
@@ -78,6 +79,7 @@ attempts = sa.Table(
     ),
     sa.Column("prune_reason", sa.Text(), nullable=True),
     sa.Column("prune_score", sa.Double(), nullable=True),
+    sa.Column("retrieved_strategy_ids", postgresql.JSONB(), nullable=True),
     sa.Column(
         "created_at",
         sa.DateTime(timezone=True),

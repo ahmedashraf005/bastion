@@ -4,3 +4,4 @@ asyncpg
 pyyaml
 httpx
 pydantic>=2,<3
+redis

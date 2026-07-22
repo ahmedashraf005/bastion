@@ -30,6 +30,8 @@ class Settings:
     ollama_base_url: str = os.getenv(
         "OLLAMA_BASE_URL", "http://localhost:11434"
     ).rstrip("/")
+    valkey_url: str = os.getenv("VALKEY_URL", "redis://localhost:6380/0")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
 
 settings = Settings()
