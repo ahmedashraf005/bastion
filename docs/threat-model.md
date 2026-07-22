@@ -42,6 +42,9 @@ Any future Bastion.Strike component may attack only SampleBank Copilot, the
 small deliberately vulnerable sample application shipped in this repository.
 It must never probe third-party infrastructure, customer systems, or services
 outside this repository.
+Branching campaigns preserve this same boundary: the reviewed allowlist is
+checked before any generation, pruning, database write, or target request,
+regardless of attempt source.
 
 SampleBank Copilot routes all model traffic exclusively through Bastion.Gate.
 It currently has no tool-calling surface because LLM06 (Excessive Agency) is

@@ -18,7 +18,9 @@ from .config import ALLOWED_TARGETS, settings
 from .attempt_sources import (
     AttemptRecord,
     AttemptSource,
+    BranchingAttemptSource,
     PlannerAttemptSource,
+    RoundCandidateOutcome,
     StaticAttempt,
     StaticAttemptSource,
 )
@@ -40,17 +42,26 @@ class AttemptsFile(BaseModel):
     owasp_id: str
     success_pattern: str
     success_normalization: Literal["none", "strip_separators"] = "none"
-    attempt_source: Literal["static", "planner"] = "static"
+    attempt_source: Literal["static", "planner", "branching"] = "static"
     attempts: list[StaticAttempt] | None = None
+    branching_factor: int | None = None
+    beam_width: int | None = None
 
     @model_validator(mode="after")
     def validate_source_configuration(self) -> "AttemptsFile":
         """Reject ambiguous or incomplete attempt-source declarations early."""
 
-        if self.attempt_source == "planner" and self.attempts is not None:
-            raise ValueError("planner attempt_source must not define an attempts list")
+        if self.attempt_source in {"planner", "branching"} and self.attempts is not None:
+            raise ValueError(
+                f"{self.attempt_source} attempt_source must not define an attempts list"
+            )
         if self.attempt_source == "static" and not self.attempts:
             raise ValueError("static attempt_source requires a non-empty attempts list")
+        if self.attempt_source == "branching":
+            if self.branching_factor is None or self.branching_factor <= 0:
+                raise ValueError("branching attempt_source requires branching_factor > 0")
+            if self.beam_width is None or self.beam_width <= 0:
+                raise ValueError("branching attempt_source requires beam_width > 0")
         return self
 
 
@@ -87,7 +98,9 @@ def normalize_success_reply(reply: str, normalization: str) -> str:
     raise ValueError(f"unsupported success normalization: {normalization}")
 
 
-def create_attempt_source(attempts_file: AttemptsFile) -> AttemptSource:
+def create_attempt_source(
+    attempts_file: AttemptsFile, success_regex: re.Pattern[str]
+) -> AttemptSource | BranchingAttemptSource:
     """Choose the source while retaining one shared campaign execution loop."""
 
     if attempts_file.attempt_source == "static":
@@ -97,7 +110,26 @@ def create_attempt_source(attempts_file: AttemptsFile) -> AttemptSource:
         model="llama3.1:8b",
         request_timeout_seconds=settings.request_timeout_seconds,
     )
-    return PlannerAttemptSource(planner, attempts_file.objective)
+    if attempts_file.attempt_source == "planner":
+        return PlannerAttemptSource(planner, attempts_file.objective)
+
+    from strike.planner.prune_gate import PruneGate
+
+    return BranchingAttemptSource(
+        planner=planner,
+        prune_gate=PruneGate(
+            ollama_base_url=settings.ollama_base_url,
+            model="llama3.1:8b",
+            request_timeout_seconds=settings.request_timeout_seconds,
+        ),
+        objective=attempts_file.objective,
+        branching_factor=attempts_file.branching_factor or 0,
+        beam_width=attempts_file.beam_width or 0,
+        success_regex=success_regex,
+        normalize_reply=lambda reply: normalize_success_reply(
+            reply, attempts_file.success_normalization
+        ),
+    )
 
 
 async def update_campaign(
@@ -135,11 +167,15 @@ async def persist_attempt(
     attack_turns: list[dict[str, str]],
     source: str,
     planner_reasoning: str | None,
-    target_status: int,
+    target_status: int | None,
     target_error: str | None,
     target_reply: str | None,
     matched: bool,
     gate_request_id: uuid.UUID | None,
+    round_number: int,
+    pruned: bool,
+    prune_reason: str | None,
+    prune_score: float | None,
 ) -> None:
     """Persist one executed attempt before campaign execution continues."""
 
@@ -156,6 +192,10 @@ async def persist_attempt(
             target_reply=target_reply,
             matched=matched,
             gate_request_id=gate_request_id,
+            round_number=round_number,
+            pruned=pruned,
+            prune_reason=prune_reason,
+            prune_score=prune_score,
         )
     )
 
@@ -183,8 +223,8 @@ async def run_campaign(
         raise ValueError("max_wall_clock_seconds must be greater than zero")
 
     attempts_file = load_attempts(attempts_path)
-    attempt_source = create_attempt_source(attempts_file)
     success_regex = re.compile(attempts_file.success_pattern)
+    attempt_source = create_attempt_source(attempts_file, success_regex)
     campaign_id = new_campaign_id()
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     start_monotonic = time.monotonic()
@@ -192,6 +232,8 @@ async def run_campaign(
     final_status = "error"
     terminal_written = False
     history: list[AttemptRecord] = []
+    sequence_number = 0
+    round_number = 0
 
     print(
         "campaign_start"
@@ -228,6 +270,105 @@ async def run_campaign(
                         final_status = "timed_out"
                         break
 
+                    if isinstance(attempt_source, BranchingAttemptSource):
+                        round_number += 1
+                        try:
+                            round_result = await attempt_source.run_round(
+                                round_number=round_number,
+                                history=history,
+                                target_url=target_url,
+                                http_client=client,
+                                queries_remaining=max_queries - queries_used,
+                            )
+                        except PlannerGenerationError as exc:
+                            final_status = "error"
+                            print(
+                                "campaign_planner_error"
+                                f" campaign_id={campaign_id} error={exc!s}"
+                            )
+                            break
+
+                        for outcome in round_result.outcomes:
+                            sequence_number += 1
+                            if outcome.target_status is not None:
+                                queries_used += 1
+                                await update_campaign(
+                                    connection, campaign_id, queries_used=queries_used
+                                )
+                            turns = [
+                                {
+                                    "role": "user",
+                                    "content": outcome.planner_attempt.user_message,
+                                }
+                            ]
+                            await persist_attempt(
+                                connection,
+                                campaign_id=campaign_id,
+                                sequence_number=sequence_number,
+                                attack_turns=turns,
+                                source="planner",
+                                planner_reasoning=outcome.planner_attempt.reasoning,
+                                target_status=outcome.target_status,
+                                target_error=outcome.target_error,
+                                target_reply=outcome.target_reply,
+                                matched=outcome.matched,
+                                gate_request_id=outcome.gate_request_id,
+                                round_number=round_number,
+                                pruned=outcome.pruned,
+                                prune_reason=outcome.prune_reason,
+                                prune_score=outcome.prune_score,
+                            )
+                            await connection.commit()
+                            if outcome.target_status is not None:
+                                history.append(
+                                    AttemptRecord(
+                                        sequence_number=sequence_number,
+                                        user_message=outcome.planner_attempt.user_message,
+                                        target_status=outcome.target_status,
+                                        target_reply=outcome.target_reply,
+                                        matched=outcome.matched,
+                                    )
+                                )
+                            print(
+                                "campaign_branch_candidate"
+                                f" campaign_id={campaign_id} round={round_number}"
+                                f" index={sequence_number} pruned={str(outcome.pruned).lower()}"
+                                f" prune_reason={outcome.prune_reason}"
+                                f" prune_score={outcome.prune_score}"
+                                f" target_status={outcome.target_status}"
+                                f" match={str(outcome.matched).lower()}"
+                            )
+
+                        if round_result.match_outcome is not None:
+                            matched_outcome = round_result.match_outcome
+                            await connection.execute(
+                                sa.insert(findings).values(
+                                    id=new_finding_id(),
+                                    campaign_id=campaign_id,
+                                    owasp_id=attempts_file.owasp_id,
+                                    attack_turns=[
+                                        {
+                                            "role": "user",
+                                            "content": matched_outcome.planner_attempt.user_message,
+                                        }
+                                    ],
+                                    target_reply=matched_outcome.target_reply,
+                                    matched_pattern=attempts_file.success_pattern,
+                                    gate_request_id=matched_outcome.gate_request_id,
+                                )
+                            )
+                            await connection.commit()
+                            final_status = "bypass_found"
+                            await update_campaign(
+                                connection,
+                                campaign_id,
+                                status=final_status,
+                                ended_at=utc_now(),
+                            )
+                            terminal_written = True
+                            break
+                        continue
+
                     try:
                         attempt_spec = await attempt_source.next_attempt(history)
                     except PlannerGenerationError as exc:
@@ -242,7 +383,8 @@ async def run_campaign(
                         final_status = "completed_no_bypass"
                         break
 
-                    sequence_number = queries_used + 1
+                    sequence_number += 1
+                    round_number += 1
                     turns = [turn.model_dump() for turn in attempt_spec.turns]
                     try:
                         response = await client.post(target_url, json={"messages": turns})
@@ -265,6 +407,10 @@ async def run_campaign(
                             target_reply=None,
                             matched=False,
                             gate_request_id=None,
+                            round_number=round_number,
+                            pruned=False,
+                            prune_reason=None,
+                            prune_score=None,
                         )
                         await connection.commit()
                         history.append(
@@ -325,6 +471,10 @@ async def run_campaign(
                         target_reply=target_reply if response.status_code == 200 else None,
                         matched=matched,
                         gate_request_id=gate_request_id,
+                        round_number=round_number,
+                        pruned=False,
+                        prune_reason=None,
+                        prune_score=None,
                     )
 
                     if response.status_code != 200:

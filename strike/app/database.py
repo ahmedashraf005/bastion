@@ -67,11 +67,17 @@ attempts = sa.Table(
     sa.Column("source", sa.Text(), nullable=False),
     sa.Column("planner_reasoning", sa.Text(), nullable=True),
     sa.Column("attack_turns", postgresql.JSONB(), nullable=False),
-    sa.Column("target_status", sa.Integer(), nullable=False),
+    sa.Column("target_status", sa.Integer(), nullable=True),
     sa.Column("target_error", sa.Text(), nullable=True),
     sa.Column("target_reply", sa.Text(), nullable=True),
     sa.Column("matched", sa.Boolean(), nullable=False),
     sa.Column("gate_request_id", postgresql.UUID(as_uuid=True), nullable=True),
+    sa.Column("round_number", sa.Integer(), nullable=False),
+    sa.Column(
+        "pruned", sa.Boolean(), server_default=sa.text("false"), nullable=False
+    ),
+    sa.Column("prune_reason", sa.Text(), nullable=True),
+    sa.Column("prune_score", sa.Double(), nullable=True),
     sa.Column(
         "created_at",
         sa.DateTime(timezone=True),
