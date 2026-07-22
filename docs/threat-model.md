@@ -58,3 +58,8 @@ boundary.
 This discipline applies both to automated campaigns and to adapters added in
 future phases. New probes outside the MVP risks require an explicit scope
 decision before implementation.
+
+Adaptive campaigns use the same hardcoded SampleBank-only target allowlist as
+static campaigns. Attempt generation never expands the target boundary: the
+allowlist check still runs first, before any campaign database write or target
+request, regardless of attempt source.

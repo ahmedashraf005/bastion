@@ -1,9 +1,8 @@
-"""Deterministic, safety-limited execution of a static Strike campaign."""
+"""Safety-limited execution shared by static and adaptive Strike campaigns."""
 
 import re
 import time
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,10 +11,17 @@ from typing import Literal
 import httpx
 import sqlalchemy as sa
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, model_validator
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from .config import ALLOWED_TARGETS, settings
+from .attempt_sources import (
+    AttemptRecord,
+    AttemptSource,
+    PlannerAttemptSource,
+    StaticAttempt,
+    StaticAttemptSource,
+)
 from .database import (
     attempts,
     campaigns,
@@ -24,29 +30,28 @@ from .database import (
     new_campaign_id,
     new_finding_id,
 )
-
-
-class AttackTurn(BaseModel):
-    """One caller-visible message sent to SampleBank Copilot."""
-
-    role: Literal["user", "assistant"]
-    content: str
-
-
-class StaticAttempt(BaseModel):
-    """A forward-compatible sequence of turns for one static attempt."""
-
-    turns: list[AttackTurn] = Field(min_length=1)
+from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
 
 
 class AttemptsFile(BaseModel):
-    """The fixed campaign objective and static attempts to execute."""
+    """Campaign metadata plus either a static list or an adaptive source."""
 
     objective: str
     owasp_id: str
     success_pattern: str
     success_normalization: Literal["none", "strip_separators"] = "none"
-    attempts: list[StaticAttempt] = Field(min_length=1)
+    attempt_source: Literal["static", "planner"] = "static"
+    attempts: list[StaticAttempt] | None = None
+
+    @model_validator(mode="after")
+    def validate_source_configuration(self) -> "AttemptsFile":
+        """Reject ambiguous or incomplete attempt-source declarations early."""
+
+        if self.attempt_source == "planner" and self.attempts is not None:
+            raise ValueError("planner attempt_source must not define an attempts list")
+        if self.attempt_source == "static" and not self.attempts:
+            raise ValueError("static attempt_source requires a non-empty attempts list")
+        return self
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,19 @@ def normalize_success_reply(reply: str, normalization: str) -> str:
     raise ValueError(f"unsupported success normalization: {normalization}")
 
 
+def create_attempt_source(attempts_file: AttemptsFile) -> AttemptSource:
+    """Choose the source while retaining one shared campaign execution loop."""
+
+    if attempts_file.attempt_source == "static":
+        return StaticAttemptSource(attempts_file.attempts or [])
+    planner = AttackerPlanner(
+        ollama_base_url=settings.ollama_base_url,
+        model="llama3.1:8b",
+        request_timeout_seconds=settings.request_timeout_seconds,
+    )
+    return PlannerAttemptSource(planner, attempts_file.objective)
+
+
 async def update_campaign(
     connection: AsyncConnection,
     campaign_id: uuid.UUID,
@@ -115,21 +133,23 @@ async def persist_attempt(
     campaign_id: uuid.UUID,
     sequence_number: int,
     attack_turns: list[dict[str, str]],
+    source: str,
+    planner_reasoning: str | None,
     target_status: int,
     target_error: str | None,
     target_reply: str | None,
     matched: bool,
     gate_request_id: uuid.UUID | None,
 ) -> None:
-    """Persist one executed static attempt before campaign execution continues."""
+    """Persist one executed attempt before campaign execution continues."""
 
     await connection.execute(
         sa.insert(attempts).values(
             id=new_attempt_id(),
             campaign_id=campaign_id,
             sequence_number=sequence_number,
-            source="static",
-            planner_reasoning=None,
+            source=source,
+            planner_reasoning=planner_reasoning,
             attack_turns=attack_turns,
             target_status=target_status,
             target_error=target_error,
@@ -163,6 +183,7 @@ async def run_campaign(
         raise ValueError("max_wall_clock_seconds must be greater than zero")
 
     attempts_file = load_attempts(attempts_path)
+    attempt_source = create_attempt_source(attempts_file)
     success_regex = re.compile(attempts_file.success_pattern)
     campaign_id = new_campaign_id()
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
@@ -170,6 +191,7 @@ async def run_campaign(
     queries_used = 0
     final_status = "error"
     terminal_written = False
+    history: list[AttemptRecord] = []
 
     print(
         "campaign_start"
@@ -198,7 +220,7 @@ async def run_campaign(
             async with httpx.AsyncClient(
                 timeout=settings.request_timeout_seconds
             ) as client:
-                for index, attempt in enumerate(attempts_file.attempts, start=1):
+                while True:
                     if queries_used >= max_queries:
                         final_status = "query_limit_reached"
                         break
@@ -206,7 +228,22 @@ async def run_campaign(
                         final_status = "timed_out"
                         break
 
-                    turns = [turn.model_dump() for turn in attempt.turns]
+                    try:
+                        attempt_spec = await attempt_source.next_attempt(history)
+                    except PlannerGenerationError as exc:
+                        final_status = "error"
+                        print(
+                            "campaign_planner_error"
+                            f" campaign_id={campaign_id} error={exc!s}"
+                        )
+                        break
+
+                    if attempt_spec is None:
+                        final_status = "completed_no_bypass"
+                        break
+
+                    sequence_number = queries_used + 1
+                    turns = [turn.model_dump() for turn in attempt_spec.turns]
                     try:
                         response = await client.post(target_url, json={"messages": turns})
                     except httpx.HTTPError as exc:
@@ -219,8 +256,10 @@ async def run_campaign(
                         await persist_attempt(
                             connection,
                             campaign_id=campaign_id,
-                            sequence_number=queries_used,
+                            sequence_number=sequence_number,
                             attack_turns=turns,
+                            source=attempt_spec.source,
+                            planner_reasoning=attempt_spec.planner_reasoning,
                             target_status=0,
                             target_error=f"{type(exc).__name__}: {exc}",
                             target_reply=None,
@@ -228,9 +267,18 @@ async def run_campaign(
                             gate_request_id=None,
                         )
                         await connection.commit()
+                        history.append(
+                            AttemptRecord(
+                                sequence_number=sequence_number,
+                                user_message=attempt_spec.turns[-1].content,
+                                target_status=0,
+                                target_reply=None,
+                                matched=False,
+                            )
+                        )
                         print(
                             "campaign_attempt"
-                            f" campaign_id={campaign_id} index={index}"
+                            f" campaign_id={campaign_id} index={sequence_number}"
                             f" target_status=network_error match=false error={exc!s}"
                         )
                         continue
@@ -268,8 +316,10 @@ async def run_campaign(
                     await persist_attempt(
                         connection,
                         campaign_id=campaign_id,
-                        sequence_number=queries_used,
+                        sequence_number=sequence_number,
                         attack_turns=turns,
+                        source=attempt_spec.source,
+                        planner_reasoning=attempt_spec.planner_reasoning,
                         target_status=response.status_code,
                         target_error=None,
                         target_reply=target_reply if response.status_code == 200 else None,
@@ -279,9 +329,18 @@ async def run_campaign(
 
                     if response.status_code != 200:
                         await connection.commit()
+                        history.append(
+                            AttemptRecord(
+                                sequence_number=sequence_number,
+                                user_message=attempt_spec.turns[-1].content,
+                                target_status=response.status_code,
+                                target_reply=None,
+                                matched=False,
+                            )
+                        )
                         print(
                             "campaign_attempt"
-                            f" campaign_id={campaign_id} index={index}"
+                            f" campaign_id={campaign_id} index={sequence_number}"
                             f" target_status={response.status_code} match=false"
                             f" response={response_body!r}"
                         )
@@ -289,12 +348,21 @@ async def run_campaign(
 
                     print(
                         "campaign_attempt"
-                        f" campaign_id={campaign_id} index={index}"
+                        f" campaign_id={campaign_id} index={sequence_number}"
                         f" target_status={response.status_code} match={str(matched).lower()}"
                         f" reply={reply!r}"
                     )
                     if not matched:
                         await connection.commit()
+                        history.append(
+                            AttemptRecord(
+                                sequence_number=sequence_number,
+                                user_message=attempt_spec.turns[-1].content,
+                                target_status=response.status_code,
+                                target_reply=target_reply,
+                                matched=False,
+                            )
+                        )
                         continue
 
                     await connection.execute(
@@ -318,8 +386,6 @@ async def run_campaign(
                     )
                     terminal_written = True
                     break
-                else:
-                    final_status = "completed_no_bypass"
 
             if not terminal_written:
                 await update_campaign(
