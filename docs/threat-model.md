@@ -5,6 +5,10 @@ The product is designed around a reviewed feedback loop: confirmed bypasses
 may become proposed defensive rules, but they do not become production policy
 without human approval.
 
+Bastion.Control v1 is an internal, read-only observability API with no
+authentication or RBAC. It is not a security boundary and must not be exposed
+as a production management interface at this stage.
+
 ## OWASP scope
 
 Every future detection rule and red-team probe must carry an OWASP Top 10 for
