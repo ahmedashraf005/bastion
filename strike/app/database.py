@@ -53,6 +53,33 @@ findings = sa.Table(
     ),
 )
 
+attempts = sa.Table(
+    "attempts",
+    metadata,
+    sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "campaign_id",
+        postgresql.UUID(as_uuid=True),
+        sa.ForeignKey("strike.campaigns.id"),
+        nullable=False,
+    ),
+    sa.Column("sequence_number", sa.Integer(), nullable=False),
+    sa.Column("source", sa.Text(), nullable=False),
+    sa.Column("planner_reasoning", sa.Text(), nullable=True),
+    sa.Column("attack_turns", postgresql.JSONB(), nullable=False),
+    sa.Column("target_status", sa.Integer(), nullable=False),
+    sa.Column("target_error", sa.Text(), nullable=True),
+    sa.Column("target_reply", sa.Text(), nullable=True),
+    sa.Column("matched", sa.Boolean(), nullable=False),
+    sa.Column("gate_request_id", postgresql.UUID(as_uuid=True), nullable=True),
+    sa.Column(
+        "created_at",
+        sa.DateTime(timezone=True),
+        server_default=sa.text("now()"),
+        nullable=False,
+    ),
+)
+
 
 def new_campaign_id() -> uuid.UUID:
     """Create a campaign identifier before the initial insert."""
@@ -62,5 +89,11 @@ def new_campaign_id() -> uuid.UUID:
 
 def new_finding_id() -> uuid.UUID:
     """Create a finding identifier before its insert."""
+
+    return uuid.uuid4()
+
+
+def new_attempt_id() -> uuid.UUID:
+    """Create an attempt identifier before its insert."""
 
     return uuid.uuid4()

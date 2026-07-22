@@ -16,7 +16,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from .config import ALLOWED_TARGETS, settings
-from .database import campaigns, findings, new_campaign_id, new_finding_id
+from .database import (
+    attempts,
+    campaigns,
+    findings,
+    new_attempt_id,
+    new_campaign_id,
+    new_finding_id,
+)
 
 
 class AttackTurn(BaseModel):
@@ -102,6 +109,37 @@ def parse_gate_request_id(response_body: object) -> uuid.UUID | None:
         return None
 
 
+async def persist_attempt(
+    connection: AsyncConnection,
+    *,
+    campaign_id: uuid.UUID,
+    sequence_number: int,
+    attack_turns: list[dict[str, str]],
+    target_status: int,
+    target_error: str | None,
+    target_reply: str | None,
+    matched: bool,
+    gate_request_id: uuid.UUID | None,
+) -> None:
+    """Persist one executed static attempt before campaign execution continues."""
+
+    await connection.execute(
+        sa.insert(attempts).values(
+            id=new_attempt_id(),
+            campaign_id=campaign_id,
+            sequence_number=sequence_number,
+            source="static",
+            planner_reasoning=None,
+            attack_turns=attack_turns,
+            target_status=target_status,
+            target_error=target_error,
+            target_reply=target_reply,
+            matched=matched,
+            gate_request_id=gate_request_id,
+        )
+    )
+
+
 async def run_campaign(
     target_key: str,
     attempts_path: Path,
@@ -176,6 +214,20 @@ async def run_campaign(
                         await update_campaign(
                             connection, campaign_id, queries_used=queries_used
                         )
+                        # No target response was received: 0 is the no-response
+                        # sentinel, with the network failure retained separately.
+                        await persist_attempt(
+                            connection,
+                            campaign_id=campaign_id,
+                            sequence_number=queries_used,
+                            attack_turns=turns,
+                            target_status=0,
+                            target_error=f"{type(exc).__name__}: {exc}",
+                            target_reply=None,
+                            matched=False,
+                            gate_request_id=None,
+                        )
+                        await connection.commit()
                         print(
                             "campaign_attempt"
                             f" campaign_id={campaign_id} index={index}"
@@ -194,7 +246,39 @@ async def run_campaign(
                     except ValueError:
                         response_body = response.text
 
+                    reply = (
+                        response_body.get("reply")
+                        if isinstance(response_body, dict)
+                        else None
+                    )
+                    target_reply = reply if isinstance(reply, str) else None
+                    match_candidate = (
+                        normalize_success_reply(
+                            target_reply, attempts_file.success_normalization
+                        )
+                        if target_reply is not None
+                        else None
+                    )
+                    matched = (
+                        isinstance(match_candidate, str)
+                        and success_regex.search(match_candidate) is not None
+                    )
+                    gate_request_id = parse_gate_request_id(response_body)
+
+                    await persist_attempt(
+                        connection,
+                        campaign_id=campaign_id,
+                        sequence_number=queries_used,
+                        attack_turns=turns,
+                        target_status=response.status_code,
+                        target_error=None,
+                        target_reply=target_reply if response.status_code == 200 else None,
+                        matched=matched,
+                        gate_request_id=gate_request_id,
+                    )
+
                     if response.status_code != 200:
+                        await connection.commit()
                         print(
                             "campaign_attempt"
                             f" campaign_id={campaign_id} index={index}"
@@ -203,22 +287,6 @@ async def run_campaign(
                         )
                         continue
 
-                    reply = (
-                        response_body.get("reply")
-                        if isinstance(response_body, dict)
-                        else None
-                    )
-                    match_candidate = (
-                        normalize_success_reply(
-                            reply, attempts_file.success_normalization
-                        )
-                        if isinstance(reply, str)
-                        else None
-                    )
-                    matched = (
-                        isinstance(match_candidate, str)
-                        and success_regex.search(match_candidate) is not None
-                    )
                     print(
                         "campaign_attempt"
                         f" campaign_id={campaign_id} index={index}"
@@ -226,6 +294,7 @@ async def run_campaign(
                         f" reply={reply!r}"
                     )
                     if not matched:
+                        await connection.commit()
                         continue
 
                     await connection.execute(
