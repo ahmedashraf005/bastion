@@ -7,6 +7,8 @@ var settings = ControlSettings.FromRepositoryEnvironment();
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls($"http://localhost:{settings.Port}");
 
+const string DashboardDevCorsPolicy = "DashboardDev";
+
 builder.Services.AddDbContext<BastionControlDbContext>(options =>
     options.UseNpgsql(settings.ConnectionString, npgsql =>
         npgsql.MigrationsHistoryTable("__control_ef_migrations", "public")));
@@ -14,10 +16,15 @@ builder.Services.AddScoped(_ => new CampaignReadRepository(settings.ConnectionSt
 builder.Services.AddScoped(_ => new FindingReadRepository(settings.ConnectionString));
 builder.Services.AddScoped(_ => new ProposedRuleReadRepository(settings.ConnectionString));
 builder.Services.AddScoped(_ => new GateRequestReadRepository(settings.ConnectionString));
+builder.Services.AddScoped(_ => new StatsReadRepository(settings.ConnectionString));
+builder.Services.AddCors(options => options.AddPolicy(DashboardDevCorsPolicy, policy =>
+    // Development-only hardcoded origin. Production needs explicit configurable CORS.
+    policy.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+app.UseCors(DashboardDevCorsPolicy);
 app.UseSwagger();
 app.UseSwaggerUI();
 
@@ -27,6 +34,10 @@ app.MapGet("/api/campaigns", async (int? limit, CampaignReadRepository repositor
     Results.Ok(await repository.ListAsync(NormalizeLimit(limit))));
 app.MapGet("/api/campaigns/{id:guid}", async (Guid id, CampaignReadRepository repository) =>
     await SingleOrNotFound(repository.GetAsync(id)));
+app.MapGet("/api/campaigns/{id:guid}/attempts", async (Guid id, CampaignReadRepository repository) =>
+    !await repository.ExistsAsync(id)
+        ? Results.NotFound()
+        : Results.Ok(await repository.ListAttemptsAsync(id)));
 
 app.MapGet("/api/findings", async (int? limit, FindingReadRepository repository) =>
     Results.Ok(await repository.ListAsync(NormalizeLimit(limit))));
@@ -51,6 +62,8 @@ app.MapGet("/api/proposed-rules/{id:guid}", async (Guid id, ProposedRuleReadRepo
 
 app.MapGet("/api/gate-requests/recent", async (int? limit, GateRequestReadRepository repository) =>
     Results.Ok(await repository.ListRecentAsync(NormalizeLimit(limit))));
+app.MapGet("/api/stats/summary", async (StatsReadRepository repository) =>
+    Results.Ok(await repository.GetSummaryAsync(DateTimeOffset.UtcNow)));
 
 app.Run();
 

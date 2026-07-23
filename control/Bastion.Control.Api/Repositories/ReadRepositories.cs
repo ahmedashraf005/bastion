@@ -37,6 +37,28 @@ public sealed class CampaignReadRepository(string connectionString)
         await using var connection = OpenConnection();
         return await connection.QuerySingleOrDefaultAsync<CampaignSummary>(sql, new { Id = id });
     }
+
+    public async Task<bool> ExistsAsync(Guid campaignId)
+    {
+        const string sql = "SELECT EXISTS (SELECT 1 FROM strike.campaigns WHERE id = @CampaignId);";
+        await using var connection = OpenConnection();
+        return await connection.QuerySingleAsync<bool>(sql, new { CampaignId = campaignId });
+    }
+
+    public async Task<IReadOnlyList<AttemptSummary>> ListAttemptsAsync(Guid campaignId)
+    {
+        const string sql = """
+            SELECT id, sequence_number AS SequenceNumber, source,
+                   round_number AS RoundNumber, matched, pruned,
+                   target_status AS TargetStatus, created_at AS CreatedAt
+            FROM strike.attempts
+            WHERE campaign_id = @CampaignId
+            ORDER BY sequence_number ASC;
+            """;
+        await using var connection = OpenConnection();
+        var rows = await connection.QueryAsync<AttemptSummary>(sql, new { CampaignId = campaignId });
+        return rows.AsList();
+    }
 }
 
 public sealed class FindingReadRepository(string connectionString)
@@ -126,5 +148,38 @@ public sealed class GateRequestReadRepository(string connectionString)
         await using var connection = OpenConnection();
         var rows = await connection.QueryAsync<GateRequestSummary>(sql, new { Limit = limit });
         return rows.AsList();
+    }
+}
+
+public sealed class StatsReadRepository(string connectionString)
+{
+    private NpgsqlConnection OpenConnection() => new(connectionString);
+
+    public async Task<StatsSummary> GetSummaryAsync(DateTimeOffset nowUtc)
+    {
+        const string activeCampaignsSql = "SELECT COUNT(*) FROM strike.campaigns WHERE status = 'running';";
+        const string confirmedBypassesSql = "SELECT COUNT(*) FROM strike.findings;";
+        const string rulesAppliedSql = "SELECT COUNT(*) FROM strike.proposed_rules WHERE status = 'applied';";
+        const string requestsBlocked24hSql = """
+            SELECT COUNT(*)
+            FROM gate.requests
+            WHERE policy_action = 'block'
+              AND received_at >= @Since;
+            """;
+
+        await using var connection = OpenConnection();
+        var since = nowUtc.AddHours(-24);
+        var activeCampaigns = await connection.QuerySingleAsync<long>(activeCampaignsSql);
+        var confirmedBypasses = await connection.QuerySingleAsync<long>(confirmedBypassesSql);
+        var rulesApplied = await connection.QuerySingleAsync<long>(rulesAppliedSql);
+        var requestsBlocked24h = await connection.QuerySingleAsync<long>(requestsBlocked24hSql, new { Since = since });
+
+        return new StatsSummary
+        {
+            ActiveCampaigns = checked((int)activeCampaigns),
+            ConfirmedBypasses = checked((int)confirmedBypasses),
+            RulesApplied = checked((int)rulesApplied),
+            RequestsBlocked24h = checked((int)requestsBlocked24h),
+        };
     }
 }

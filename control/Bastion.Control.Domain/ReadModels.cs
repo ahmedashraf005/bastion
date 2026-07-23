@@ -52,3 +52,23 @@ public sealed class GateRequestSummary
     public string? PolicyAction { get; init; }
     public string? Error { get; init; }
 }
+
+public sealed class AttemptSummary
+{
+    public Guid Id { get; init; }
+    public int SequenceNumber { get; init; }
+    public required string Source { get; init; }
+    public int RoundNumber { get; init; }
+    public bool Matched { get; init; }
+    public bool Pruned { get; init; }
+    public int? TargetStatus { get; init; }
+    public DateTimeOffset CreatedAt { get; init; }
+}
+
+public sealed class StatsSummary
+{
+    public int ActiveCampaigns { get; init; }
+    public int ConfirmedBypasses { get; init; }
+    public int RulesApplied { get; init; }
+    public int RequestsBlocked24h { get; init; }
+}
