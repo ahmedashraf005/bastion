@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 var settings = ControlSettings.FromRepositoryEnvironment();
 var builder = WebApplication.CreateBuilder(args);
-builder.WebHost.UseUrls($"http://localhost:{settings.Port}");
+builder.WebHost.UseUrls($"http://{settings.ListenHost}:{settings.Port}");
 
 const string DashboardDevCorsPolicy = "DashboardDev";
 

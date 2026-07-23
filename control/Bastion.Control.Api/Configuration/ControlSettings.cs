@@ -3,7 +3,7 @@ using Npgsql;
 
 namespace Bastion.Control.Api.Configuration;
 
-public sealed record ControlSettings(string ConnectionString, int Port)
+public sealed record ControlSettings(string ConnectionString, int Port, string ListenHost)
 {
     public static ControlSettings FromRepositoryEnvironment()
     {
@@ -17,17 +17,27 @@ public sealed record ControlSettings(string ConnectionString, int Port)
         var user = Required("POSTGRES_USER");
         var password = Required("POSTGRES_PASSWORD");
         var port = int.Parse(Required("POSTGRES_PORT"));
+        var host = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "localhost";
         var controlPort = int.TryParse(Environment.GetEnvironmentVariable("CONTROL_PORT"), out var parsedPort)
             ? parsedPort
             : 5080;
+        var listenHost = Environment.GetEnvironmentVariable("CONTROL_LISTEN_HOST") ?? "localhost";
 
-        return new ControlSettings(BuildConnectionString(database, user, password, port), controlPort);
+        return new ControlSettings(
+            BuildConnectionString(database, user, password, port, host),
+            controlPort,
+            listenHost);
     }
 
-    public static string BuildConnectionString(string database, string user, string password, int port) =>
+    public static string BuildConnectionString(
+        string database,
+        string user,
+        string password,
+        int port,
+        string host = "localhost") =>
         new NpgsqlConnectionStringBuilder
         {
-            Host = "localhost",
+            Host = host,
             Port = port,
             Database = database,
             Username = user,

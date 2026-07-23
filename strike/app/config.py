@@ -11,8 +11,18 @@ load_dotenv()
 
 # This deliberately requires a reviewed code change before Strike can target
 # anything beyond the bundled, synthetic SampleBank Copilot application.
+CONTAINER_SAMPLE_BANK_URL = "http://sample-target:8080/chat"
+HOST_SAMPLE_BANK_URL = "http://localhost:8080/chat"
+
+# Compose may select the container-only service DNS address, but it cannot
+# supply an arbitrary target URL: both allowable endpoints remain reviewed
+# constants bound to the same synthetic SampleBank target key.
 ALLOWED_TARGETS: dict[str, str] = {
-    "sample-bank": "http://localhost:8080/chat",
+    "sample-bank": (
+        CONTAINER_SAMPLE_BANK_URL
+        if os.getenv("BASTION_CONTAINERIZED") == "true"
+        else HOST_SAMPLE_BANK_URL
+    ),
 }
 
 

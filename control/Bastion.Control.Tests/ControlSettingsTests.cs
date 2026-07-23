@@ -21,4 +21,19 @@ public sealed class ControlSettingsTests
         Assert.Equal("bastion", builder.Username);
         Assert.Equal("dev-password", builder.Password);
     }
+
+    [Fact]
+    public void BuildConnectionString_accepts_a_container_postgres_host()
+    {
+        var connectionString = ControlSettings.BuildConnectionString(
+            database: "bastion",
+            user: "bastion",
+            password: "dev-password",
+            port: 5432,
+            host: "postgres");
+
+        var builder = new NpgsqlConnectionStringBuilder(connectionString);
+
+        Assert.Equal("postgres", builder.Host);
+    }
 }

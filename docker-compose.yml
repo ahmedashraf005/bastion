@@ -34,8 +34,127 @@ services:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  ollama-model-init:
+    image: ollama/ollama:0.32.1
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for model in llama3.1:8b nomic-embed-text; do
+          if ollama list | awk 'NR > 1 { print $$1 }' | grep -F -x -e "$$model" -e "$$model:latest" >/dev/null; then
+            echo "ollama_model_present model=$$model"
+          else
+            echo "ollama_model_pull_started model=$$model"
+            ollama pull "$$model"
+            echo "ollama_model_pull_completed model=$$model"
+          fi
+        done
+
+  gate:
+    build:
+      context: ./gate
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bastion}:${POSTGRES_PASSWORD:-bastion_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-bastion}
+      OLLAMA_BASE_URL: http://ollama:11434
+      GATE_PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama-model-init:
+        condition: service_completed_successfully
+    ports:
+      - "${GATE_PORT:-8000}:8000"
+    volumes:
+      - gate_hf_cache:/var/lib/bastion/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 18
+      start_period: 120s
+
+  sample-target:
+    build:
+      context: ./sample-target
+    env_file: .env
+    environment:
+      GATE_BASE_URL: http://gate:8000
+      SAMPLE_TARGET_PORT: 8080
+    depends_on:
+      gate:
+        condition: service_healthy
+    ports:
+      - "${SAMPLE_TARGET_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+
+  control:
+    build:
+      context: ./control
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      CONTROL_LISTEN_HOST: 0.0.0.0
+      CONTROL_PORT: 5080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${CONTROL_PORT:-5080}:5080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:5080/healthz >/dev/null"]
+      interval: 10s
+      timeout: 8s
+      retries: 12
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        VITE_CONTROL_BASE_URL: http://localhost:5080
+    depends_on:
+      control:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+  strike:
+    build:
+      context: .
+      dockerfile: strike/Dockerfile
+    profiles: ["manual"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bastion}:${POSTGRES_PASSWORD:-bastion_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-bastion}
+      OLLAMA_BASE_URL: http://ollama:11434
+      VALKEY_URL: redis://valkey:6379/0
+      BASTION_CONTAINERIZED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      ollama-model-init:
+        condition: service_completed_successfully
+      sample-target:
+        condition: service_healthy
 
 volumes:
   postgres_data:
   valkey_data:
   ollama_data:
+  gate_hf_cache:
