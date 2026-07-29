@@ -10,7 +10,7 @@ from typing import Callable, Literal
 import httpx
 import sqlalchemy as sa
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from redis import asyncio as redis
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
@@ -54,6 +54,7 @@ class AttemptsFile(BaseModel):
     attempts: list[StaticAttempt] | None = None
     branching_factor: int | None = None
     beam_width: int | None = None
+    planner_request_timeout_seconds: float | None = Field(default=None, gt=0)
     use_strategy_library: bool = False
     strategy_retrieval_k: int = 3
 
@@ -185,6 +186,7 @@ async def renew_campaign_lease(
 def create_attempt_source(
     attempts_file: AttemptsFile,
     evaluate_response: Callable[[str | None, int, object], SuccessEvaluation],
+    planner_request_timeout_seconds: float,
     retrieved_strategies: list[str] | None = None,
 ) -> AttemptSource | BranchingAttemptSource:
     """Choose the source while retaining one shared campaign execution loop."""
@@ -194,7 +196,7 @@ def create_attempt_source(
     planner = AttackerPlanner(
         ollama_base_url=settings.ollama_base_url,
         model="llama3.1:8b",
-        request_timeout_seconds=settings.request_timeout_seconds,
+        request_timeout_seconds=planner_request_timeout_seconds,
     )
     if attempts_file.attempt_source == "planner":
         return PlannerAttemptSource(planner, attempts_file.objective)
@@ -206,7 +208,7 @@ def create_attempt_source(
         prune_gate=PruneGate(
             ollama_base_url=settings.ollama_base_url,
             model="llama3.1:8b",
-            request_timeout_seconds=settings.request_timeout_seconds,
+            request_timeout_seconds=planner_request_timeout_seconds,
         ),
         objective=attempts_file.objective,
         branching_factor=attempts_file.branching_factor or 0,
@@ -379,6 +381,10 @@ async def run_campaign(
     # Resolve before any database or network action. The resulting value stays
     # inside this scorer closure and is never passed to an LLM-facing object.
     resolved_marker = resolve_marker_ref(attempts_file.success.marker_ref)
+    planner_request_timeout_seconds = (
+        attempts_file.planner_request_timeout_seconds
+        or settings.planner_request_timeout_seconds
+    )
 
     def evaluate_response(
         reply: str | None, response_status: int, response_body: object
@@ -430,6 +436,7 @@ async def run_campaign(
     attempt_source = create_attempt_source(
         attempts_file,
         evaluate_response,
+        planner_request_timeout_seconds,
         retrieved_strategy_descriptions,
     )
     campaign_id = new_campaign_id()
@@ -450,6 +457,7 @@ async def run_campaign(
         f" objective={attempts_file.objective!r} max_queries={max_queries}"
         f" max_wall_clock_seconds={max_wall_clock_seconds}"
         f" reconciled_expired_campaigns={reconciled_campaigns}"
+        f" planner_request_timeout_seconds={planner_request_timeout_seconds}"
     )
 
     try:

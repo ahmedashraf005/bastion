@@ -40,7 +40,7 @@ class AttackerPlanner:
         ollama_base_url: str,
         model: str,
         max_parse_retries: int = 3,
-        request_timeout_seconds: float = 60,
+        request_timeout_seconds: float = 45,
     ) -> None:
         self._ollama_base_url = ollama_base_url.rstrip("/")
         self._model = model
