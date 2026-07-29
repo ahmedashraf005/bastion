@@ -1,12 +1,11 @@
 """Safety-limited execution shared by static and adaptive Strike campaigns."""
 
-import re
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import httpx
 import sqlalchemy as sa
@@ -35,6 +34,11 @@ from .database import (
     new_proposed_rule_id,
     proposed_rules,
 )
+from .success_contract import (
+    SuccessEvaluation,
+    classify_target_response,
+    resolve_marker_ref,
+)
 from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
 from strike.planner.strategy_library import StrategyLibrary
 from strike.synthesizer.rule_synthesizer import FindingEvidence, RuleSynthesizer
@@ -45,8 +49,7 @@ class AttemptsFile(BaseModel):
 
     objective: str
     owasp_id: str
-    success_pattern: str
-    success_normalization: Literal["none", "strip_separators"] = "none"
+    success: "SuccessContract"
     attempt_source: Literal["static", "planner", "branching"] = "static"
     attempts: list[StaticAttempt] | None = None
     branching_factor: int | None = None
@@ -76,6 +79,40 @@ class AttemptsFile(BaseModel):
         return self
 
 
+class NearMatchContract(BaseModel):
+    """Bounded similarity settings for non-confirming marker evidence."""
+
+    anchor: str
+    suffix_length: int
+    max_edit_distance: int
+    minimum_positional_overlap: float
+    max_anchor_to_suffix_gap: int
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "NearMatchContract":
+        if self.suffix_length <= 0:
+            raise ValueError("success.near_match.suffix_length must be greater than zero")
+        if self.max_edit_distance < 0:
+            raise ValueError("success.near_match.max_edit_distance must not be negative")
+        if not 0 <= self.minimum_positional_overlap <= 1:
+            raise ValueError(
+                "success.near_match.minimum_positional_overlap must be between 0 and 1"
+            )
+        if self.max_anchor_to_suffix_gap < 0:
+            raise ValueError(
+                "success.near_match.max_anchor_to_suffix_gap must not be negative"
+            )
+        return self
+
+
+class SuccessContract(BaseModel):
+    """Marker-reference success configuration that excludes a marker value from YAML."""
+
+    marker_ref: str
+    canonicalization: Literal["strip_separators"]
+    near_match: NearMatchContract
+
+
 @dataclass(frozen=True)
 class CampaignOutcome:
     """Final persisted state returned to the CLI after execution."""
@@ -99,19 +136,55 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def normalize_success_reply(reply: str, normalization: str) -> str:
-    """Apply the attempts file's narrowly defined success-match normalization."""
+def lease_expiry() -> datetime:
+    """Return the next bounded ownership deadline for this runner process."""
 
-    if normalization == "none":
-        return reply
-    if normalization == "strip_separators":
-        return re.sub(r"[ \t\n\r\-_.]", "", reply)
-    raise ValueError(f"unsupported success normalization: {normalization}")
+    return utc_now() + timedelta(seconds=settings.runner_lease_seconds)
+
+
+async def reconcile_expired_campaigns(engine: AsyncEngine) -> int:
+    """Interrupt only rows with an explicit, expired runner lease."""
+
+    async with engine.begin() as connection:
+        result = await connection.execute(
+            sa.update(campaigns)
+            .where(
+                campaigns.c.status == "running",
+                campaigns.c.lease_expires_at.is_not(None),
+                campaigns.c.lease_expires_at < utc_now(),
+            )
+            .values(
+                status="interrupted",
+                ended_at=utc_now(),
+                recovery_reason="runner lease expired before campaign completion",
+                lease_expires_at=None,
+            )
+        )
+    return result.rowcount or 0
+
+
+async def renew_campaign_lease(
+    connection: AsyncConnection, campaign_id: uuid.UUID, owner_id: uuid.UUID
+) -> None:
+    """Renew this runner's lease and fail rather than writing after ownership loss."""
+
+    result = await connection.execute(
+        sa.update(campaigns)
+        .where(
+            campaigns.c.id == campaign_id,
+            campaigns.c.status == "running",
+            campaigns.c.runner_owner_id == owner_id,
+        )
+        .values(lease_expires_at=lease_expiry())
+    )
+    if result.rowcount != 1:
+        raise RuntimeError(f"campaign lease lost for {campaign_id}")
+    await connection.commit()
 
 
 def create_attempt_source(
     attempts_file: AttemptsFile,
-    success_regex: re.Pattern[str],
+    evaluate_response: Callable[[str | None, int, object], SuccessEvaluation],
     retrieved_strategies: list[str] | None = None,
 ) -> AttemptSource | BranchingAttemptSource:
     """Choose the source while retaining one shared campaign execution loop."""
@@ -138,10 +211,7 @@ def create_attempt_source(
         objective=attempts_file.objective,
         branching_factor=attempts_file.branching_factor or 0,
         beam_width=attempts_file.beam_width or 0,
-        success_regex=success_regex,
-        normalize_reply=lambda reply: normalize_success_reply(
-            reply, attempts_file.success_normalization
-        ),
+        evaluate_response=evaluate_response,
         retrieved_strategies=retrieved_strategies,
     )
 
@@ -200,6 +270,7 @@ async def synthesize_proposed_rule(
     finding_id: uuid.UUID,
     attack_turns: list[dict[str, str]],
     target_reply: str,
+    normalization_evidence: dict[str, object] | None = None,
 ) -> None:
     """Best-effort synthesis after a persisted adaptive finding; never change its outcome."""
 
@@ -209,40 +280,23 @@ async def synthesize_proposed_rule(
                 finding_id=str(finding_id),
                 attack_turns=attack_turns,
                 target_reply=target_reply,
+                normalization_evidence=normalization_evidence,
             )
         )
         if proposal is None:
             print(f"rule_synthesizer_no_proposal finding_id={finding_id}")
             return
 
-        used_ids = _leak_pattern_ids()
-        existing_result = await connection.execute(sa.select(proposed_rules.c.proposed_id))
-        used_ids.update(existing_result.scalars())
-        base = _slug_base(proposal.description)
-        proposed_id = base
-        suffix = 2
-        while proposed_id in used_ids:
-            proposed_id = f"{base}-{suffix}"
-            suffix += 1
-
-        await connection.execute(
-            sa.insert(proposed_rules).values(
-                id=new_proposed_rule_id(),
-                finding_id=finding_id,
-                proposed_id=proposed_id,
-                proposed_pattern=proposal.pattern,
-                proposed_pattern_type=proposal.pattern_type,
-                proposed_normalize=proposal.normalize,
-                proposed_description=proposal.description,
-                verification_passed=True,
-                status="pending_review",
-            )
-        )
-        await connection.commit()
+        tier, promotion_block = synthesizer.promotion_tier(proposal)
+        # The legacy proposed_rules table only represents inline pattern rows.
+        # Ref-based signatures and additive normalizations await their own
+        # versioned migration; never degrade them into a marker-bearing row.
         print(
-            "rule_synthesizer_proposed"
-            f" finding_id={finding_id} proposed_id={proposed_id}"
+            "rule_synthesizer_verified_proposal_not_persisted"
+            f" finding_id={finding_id} proposal_type={proposal.proposal_type}"
+            f" promotion_tier={tier} promotion_block={promotion_block}"
         )
+        return
     except Exception as exc:
         print(f"rule_synthesizer_failed finding_id={finding_id} error={exc!s}")
 
@@ -259,6 +313,9 @@ async def persist_attempt(
     target_error: str | None,
     target_reply: str | None,
     matched: bool,
+    outcome: str,
+    normalization_evidence: dict[str, object] | None,
+    parent_node_id: uuid.UUID | None,
     gate_request_id: uuid.UUID | None,
     round_number: int,
     pruned: bool,
@@ -266,12 +323,13 @@ async def persist_attempt(
     prune_score: float | None,
     # Context shown to the planner, not proof that any candidate used it.
     retrieved_strategy_ids: list[str] | None = None,
-) -> None:
+) -> uuid.UUID:
     """Persist one executed attempt before campaign execution continues."""
 
+    attempt_id = new_attempt_id()
     await connection.execute(
         sa.insert(attempts).values(
-            id=new_attempt_id(),
+            id=attempt_id,
             campaign_id=campaign_id,
             sequence_number=sequence_number,
             source=source,
@@ -281,6 +339,9 @@ async def persist_attempt(
             target_error=target_error,
             target_reply=target_reply,
             matched=matched,
+            outcome=outcome,
+            normalization_evidence=normalization_evidence,
+            parent_node_id=parent_node_id,
             gate_request_id=gate_request_id,
             round_number=round_number,
             pruned=pruned,
@@ -289,6 +350,7 @@ async def persist_attempt(
             retrieved_strategy_ids=retrieved_strategy_ids,
         )
     )
+    return attempt_id
 
 
 async def run_campaign(
@@ -314,7 +376,28 @@ async def run_campaign(
         raise ValueError("max_wall_clock_seconds must be greater than zero")
 
     attempts_file = load_attempts(attempts_path)
-    success_regex = re.compile(attempts_file.success_pattern)
+    # Resolve before any database or network action. The resulting value stays
+    # inside this scorer closure and is never passed to an LLM-facing object.
+    resolved_marker = resolve_marker_ref(attempts_file.success.marker_ref)
+
+    def evaluate_response(
+        reply: str | None, response_status: int, response_body: object
+    ) -> SuccessEvaluation:
+        return classify_target_response(
+            reply,
+            response_status=response_status,
+            response_body=response_body,
+            marker_ref=attempts_file.success.marker_ref,
+            anchor=attempts_file.success.near_match.anchor,
+            suffix_length=attempts_file.success.near_match.suffix_length,
+            max_edit_distance=attempts_file.success.near_match.max_edit_distance,
+            minimum_positional_overlap=(
+                attempts_file.success.near_match.minimum_positional_overlap
+            ),
+            max_anchor_to_suffix_gap=(
+                attempts_file.success.near_match.max_anchor_to_suffix_gap
+            ),
+        )
     valkey_client = None
     strategy_library: StrategyLibrary | None = None
     retrieved_strategy_ids: list[str] | None = None
@@ -323,6 +406,7 @@ async def run_campaign(
         ollama_base_url=settings.ollama_base_url,
         model="llama3.1:8b",
         request_timeout_seconds=settings.request_timeout_seconds,
+        forbidden_marker_values={resolved_marker.value},
     )
     if attempts_file.use_strategy_library:
         valkey_client = redis.from_url(settings.valkey_url, decode_responses=True)
@@ -344,10 +428,14 @@ async def run_campaign(
             f" enabled=true retrieved_strategy_ids={retrieved_strategy_ids}"
         )
     attempt_source = create_attempt_source(
-        attempts_file, success_regex, retrieved_strategy_descriptions
+        attempts_file,
+        evaluate_response,
+        retrieved_strategy_descriptions,
     )
     campaign_id = new_campaign_id()
+    runner_owner_id = uuid.uuid4()
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    reconciled_campaigns = await reconcile_expired_campaigns(engine)
     start_monotonic = time.monotonic()
     queries_used = 0
     final_status = "error"
@@ -361,6 +449,7 @@ async def run_campaign(
         f" campaign_id={campaign_id} target={target_key}"
         f" objective={attempts_file.objective!r} max_queries={max_queries}"
         f" max_wall_clock_seconds={max_wall_clock_seconds}"
+        f" reconciled_expired_campaigns={reconciled_campaigns}"
     )
 
     try:
@@ -376,6 +465,8 @@ async def run_campaign(
                     max_queries=max_queries,
                     queries_used=0,
                     max_wall_clock_seconds=max_wall_clock_seconds,
+                    runner_owner_id=runner_owner_id,
+                    lease_expires_at=lease_expiry(),
                 )
             )
             await connection.commit()
@@ -384,6 +475,7 @@ async def run_campaign(
                 timeout=settings.request_timeout_seconds
             ) as client:
                 while True:
+                    await renew_campaign_lease(connection, campaign_id, runner_owner_id)
                     if queries_used >= max_queries:
                         final_status = "query_limit_reached"
                         break
@@ -393,6 +485,13 @@ async def run_campaign(
 
                     if isinstance(attempt_source, BranchingAttemptSource):
                         round_number += 1
+                        parent_node_id = history[-1].attempt_id if history else None
+
+                        async def renew_lease() -> None:
+                            await renew_campaign_lease(
+                                connection, campaign_id, runner_owner_id
+                            )
+
                         try:
                             round_result = await attempt_source.run_round(
                                 round_number=round_number,
@@ -400,6 +499,7 @@ async def run_campaign(
                                 target_url=target_url,
                                 http_client=client,
                                 queries_remaining=max_queries - queries_used,
+                                before_external_call=renew_lease,
                             )
                         except PlannerGenerationError as exc:
                             final_status = "error"
@@ -422,7 +522,7 @@ async def run_campaign(
                                     "content": outcome.planner_attempt.user_message,
                                 }
                             ]
-                            await persist_attempt(
+                            attempt_id = await persist_attempt(
                                 connection,
                                 campaign_id=campaign_id,
                                 sequence_number=sequence_number,
@@ -433,6 +533,9 @@ async def run_campaign(
                                 target_error=outcome.target_error,
                                 target_reply=outcome.target_reply,
                                 matched=outcome.matched,
+                                outcome=outcome.outcome,
+                                normalization_evidence=outcome.normalization_evidence,
+                                parent_node_id=parent_node_id,
                                 gate_request_id=outcome.gate_request_id,
                                 round_number=round_number,
                                 pruned=outcome.pruned,
@@ -444,6 +547,7 @@ async def run_campaign(
                             if outcome.target_status is not None:
                                 history.append(
                                     AttemptRecord(
+                                        attempt_id=attempt_id,
                                         sequence_number=sequence_number,
                                         user_message=outcome.planner_attempt.user_message,
                                         target_status=outcome.target_status,
@@ -476,7 +580,7 @@ async def run_campaign(
                                         }
                                     ],
                                     target_reply=matched_outcome.target_reply,
-                                    matched_pattern=attempts_file.success_pattern,
+                                    matched_pattern=attempts_file.success.marker_ref,
                                     gate_request_id=matched_outcome.gate_request_id,
                                 )
                             )
@@ -487,6 +591,7 @@ async def run_campaign(
                                 campaign_id,
                                 status=final_status,
                                 ended_at=utc_now(),
+                                lease_expires_at=None,
                             )
                             terminal_written = True
                             if strategy_library is not None:
@@ -532,6 +637,7 @@ async def run_campaign(
                                     }
                                 ],
                                 target_reply=matched_outcome.target_reply or "",
+                                normalization_evidence=matched_outcome.normalization_evidence,
                             )
                             break
                         continue
@@ -554,6 +660,7 @@ async def run_campaign(
                     round_number += 1
                     turns = [turn.model_dump() for turn in attempt_spec.turns]
                     try:
+                        await renew_campaign_lease(connection, campaign_id, runner_owner_id)
                         response = await client.post(target_url, json={"messages": turns})
                     except httpx.HTTPError as exc:
                         queries_used += 1
@@ -562,7 +669,7 @@ async def run_campaign(
                         )
                         # No target response was received: 0 is the no-response
                         # sentinel, with the network failure retained separately.
-                        await persist_attempt(
+                        attempt_id = await persist_attempt(
                             connection,
                             campaign_id=campaign_id,
                             sequence_number=sequence_number,
@@ -573,6 +680,9 @@ async def run_campaign(
                             target_error=f"{type(exc).__name__}: {exc}",
                             target_reply=None,
                             matched=False,
+                            outcome="transport",
+                            normalization_evidence=None,
+                            parent_node_id=None,
                             gate_request_id=None,
                             round_number=round_number,
                             pruned=False,
@@ -583,6 +693,7 @@ async def run_campaign(
                         await connection.commit()
                         history.append(
                             AttemptRecord(
+                                attempt_id=attempt_id,
                                 sequence_number=sequence_number,
                                 user_message=attempt_spec.turns[-1].content,
                                 target_status=0,
@@ -614,20 +725,13 @@ async def run_campaign(
                         else None
                     )
                     target_reply = reply if isinstance(reply, str) else None
-                    match_candidate = (
-                        normalize_success_reply(
-                            target_reply, attempts_file.success_normalization
-                        )
-                        if target_reply is not None
-                        else None
+                    evaluation = evaluate_response(
+                        target_reply, response.status_code, response_body
                     )
-                    matched = (
-                        isinstance(match_candidate, str)
-                        and success_regex.search(match_candidate) is not None
-                    )
+                    matched = evaluation.confirmed
                     gate_request_id = parse_gate_request_id(response_body)
 
-                    await persist_attempt(
+                    attempt_id = await persist_attempt(
                         connection,
                         campaign_id=campaign_id,
                         sequence_number=sequence_number,
@@ -638,6 +742,9 @@ async def run_campaign(
                         target_error=None,
                         target_reply=target_reply if response.status_code == 200 else None,
                         matched=matched,
+                        outcome=evaluation.outcome,
+                        normalization_evidence=evaluation.normalization_evidence,
+                        parent_node_id=None,
                         gate_request_id=gate_request_id,
                         round_number=round_number,
                         pruned=False,
@@ -650,6 +757,7 @@ async def run_campaign(
                         await connection.commit()
                         history.append(
                             AttemptRecord(
+                                attempt_id=attempt_id,
                                 sequence_number=sequence_number,
                                 user_message=attempt_spec.turns[-1].content,
                                 target_status=response.status_code,
@@ -675,6 +783,7 @@ async def run_campaign(
                         await connection.commit()
                         history.append(
                             AttemptRecord(
+                                attempt_id=attempt_id,
                                 sequence_number=sequence_number,
                                 user_message=attempt_spec.turns[-1].content,
                                 target_status=response.status_code,
@@ -692,7 +801,8 @@ async def run_campaign(
                             owasp_id=attempts_file.owasp_id,
                             attack_turns=turns,
                             target_reply=reply,
-                            matched_pattern=attempts_file.success_pattern,
+                            normalization_evidence=evaluation.normalization_evidence,
+                            matched_pattern=attempts_file.success.marker_ref,
                             gate_request_id=parse_gate_request_id(response_body),
                         )
                     )
@@ -703,6 +813,7 @@ async def run_campaign(
                         campaign_id,
                         status=final_status,
                         ended_at=utc_now(),
+                        lease_expires_at=None,
                     )
                     terminal_written = True
                     if attempt_spec.source == "planner":
@@ -721,6 +832,7 @@ async def run_campaign(
                     campaign_id,
                     status=final_status,
                     ended_at=utc_now(),
+                    lease_expires_at=None,
                 )
                 terminal_written = True
     except Exception:
@@ -731,6 +843,7 @@ async def run_campaign(
                     campaign_id,
                     status="error",
                     ended_at=utc_now(),
+                    lease_expires_at=None,
                 )
         raise
     finally:

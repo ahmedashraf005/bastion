@@ -42,6 +42,7 @@ class Settings:
     ).rstrip("/")
     valkey_url: str = os.getenv("VALKEY_URL", "redis://localhost:6380/0")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+    runner_lease_seconds: int = int(os.getenv("STRIKE_RUNNER_LEASE_SECONDS", "180"))
 
 
 settings = Settings()

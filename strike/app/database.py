@@ -8,6 +8,20 @@ from sqlalchemy.dialects import postgresql
 
 metadata = sa.MetaData(schema="strike")
 
+attempt_outcome = postgresql.ENUM(
+    "confirmed_bypass",
+    "near_marker_miss",
+    "marker_shaped_nonmatch",
+    "gate_redacted_pattern",
+    "clean_no_marker_evidence",
+    "no_response",
+    "transport",
+    "pruned",
+    name="attempt_outcome",
+    schema="strike",
+    create_type=False,
+)
+
 campaigns = sa.Table(
     "campaigns",
     metadata,
@@ -28,6 +42,9 @@ campaigns = sa.Table(
         "queries_used", sa.Integer(), server_default=sa.text("0"), nullable=False
     ),
     sa.Column("max_wall_clock_seconds", sa.Integer(), nullable=False),
+    sa.Column("runner_owner_id", postgresql.UUID(as_uuid=True), nullable=True),
+    sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("recovery_reason", sa.Text(), nullable=True),
 )
 
 findings = sa.Table(
@@ -82,6 +99,35 @@ proposed_rules = sa.Table(
     ),
 )
 
+normalization_proposals = sa.Table(
+    "normalization_proposals",
+    metadata,
+    sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "finding_id",
+        postgresql.UUID(as_uuid=True),
+        sa.ForeignKey("strike.findings.id"),
+        nullable=False,
+    ),
+    sa.Column("proposal", postgresql.JSONB(), nullable=False),
+    sa.Column("verification_passed", sa.Boolean(), nullable=False),
+    sa.Column("verification_mode", sa.Text(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("approver", sa.Text(), nullable=True),
+    sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("approval_evidence", postgresql.JSONB(), nullable=True),
+    sa.Column("version_id", sa.Text(), nullable=False),
+    sa.Column("applied_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("reverted_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("revert_reason", sa.Text(), nullable=True),
+    sa.Column(
+        "created_at",
+        sa.DateTime(timezone=True),
+        server_default=sa.text("now()"),
+        nullable=False,
+    ),
+)
+
 attempts = sa.Table(
     "attempts",
     metadata,
@@ -100,6 +146,9 @@ attempts = sa.Table(
     sa.Column("target_error", sa.Text(), nullable=True),
     sa.Column("target_reply", sa.Text(), nullable=True),
     sa.Column("matched", sa.Boolean(), nullable=False),
+    sa.Column("outcome", attempt_outcome, nullable=True),
+    sa.Column("normalization_evidence", postgresql.JSONB(), nullable=True),
+    sa.Column("parent_node_id", postgresql.UUID(as_uuid=True), nullable=True),
     sa.Column("gate_request_id", postgresql.UUID(as_uuid=True), nullable=True),
     sa.Column("round_number", sa.Integer(), nullable=False),
     sa.Column(
@@ -137,5 +186,11 @@ def new_attempt_id() -> uuid.UUID:
 
 def new_proposed_rule_id() -> uuid.UUID:
     """Create an identifier for a human-reviewable synthesized rule."""
+
+    return uuid.uuid4()
+
+
+def new_normalization_proposal_id() -> uuid.UUID:
+    """Create an identifier for a versioned detector-normalization proposal."""
 
     return uuid.uuid4()

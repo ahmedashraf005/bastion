@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
-from typing import Callable, Literal, Protocol
+from typing import Awaitable, Callable, Literal, Protocol
 
 import httpx
 from pydantic import BaseModel, Field
 
 from strike.planner.attacker import AttackerPlanner, PlannerAttempt
 from strike.planner.prune_gate import PruneGate
+from strike.app.success_contract import SuccessEvaluation
 
 
 class AttemptTurn(BaseModel):
@@ -38,6 +38,7 @@ class AttemptSpec(BaseModel):
 class AttemptRecord(BaseModel):
     """Persisted outcome view supplied to an adaptive planner."""
 
+    attempt_id: uuid.UUID
     sequence_number: int
     user_message: str
     target_status: int
@@ -102,6 +103,8 @@ class RoundCandidateOutcome:
     target_error: str | None
     target_reply: str | None
     matched: bool
+    outcome: str
+    normalization_evidence: dict[str, object] | None
     gate_request_id: uuid.UUID | None
 
 
@@ -124,8 +127,7 @@ class BranchingAttemptSource:
         objective: str,
         branching_factor: int,
         beam_width: int,
-        success_regex: re.Pattern[str],
-        normalize_reply: Callable[[str], str],
+        evaluate_response: Callable[[str | None, int, object], SuccessEvaluation],
         retrieved_strategies: list[str] | None = None,
     ) -> None:
         if branching_factor <= 0:
@@ -137,8 +139,7 @@ class BranchingAttemptSource:
         self._objective = objective
         self._branching_factor = branching_factor
         self._beam_width = beam_width
-        self._success_regex = success_regex
-        self._normalize_reply = normalize_reply
+        self._evaluate_response = evaluate_response
         self._retrieved_strategies = retrieved_strategies or []
 
     @staticmethod
@@ -160,18 +161,23 @@ class BranchingAttemptSource:
         target_url: str,
         http_client: httpx.AsyncClient,
         queries_remaining: int,
+        before_external_call: Callable[[], Awaitable[None]] | None = None,
     ) -> RoundResult:
         """Run one generate-evaluate-query round without querying pruned candidates."""
 
         if queries_remaining <= 0:
             return RoundResult(outcomes=[], queries_consumed=0, match_outcome=None)
 
+        if before_external_call is not None:
+            await before_external_call()
         batch = await self._planner.generate_candidate_batch(
             self._objective,
             history,
             self._branching_factor,
             self._retrieved_strategies,
         )
+        if before_external_call is not None:
+            await before_external_call()
         evaluation = await self._prune_gate.evaluate(self._objective, batch.candidates)
 
         indexed = list(enumerate(zip(batch.candidates, evaluation.evaluations)))
@@ -197,6 +203,8 @@ class BranchingAttemptSource:
                     target_error=None,
                     target_reply=None,
                     matched=False,
+                    outcome="pruned",
+                    normalization_evidence=None,
                     gate_request_id=None,
                 )
             elif index not in survivor_indexes:
@@ -209,6 +217,8 @@ class BranchingAttemptSource:
                     target_error=None,
                     target_reply=None,
                     matched=False,
+                    outcome="pruned",
+                    normalization_evidence=None,
                     gate_request_id=None,
                 )
 
@@ -227,6 +237,8 @@ class BranchingAttemptSource:
                 # have no permitted prune reason, so are not persisted as attempts.
                 break
             try:
+                if before_external_call is not None:
+                    await before_external_call()
                 response = await http_client.post(
                     target_url,
                     json={
@@ -246,6 +258,8 @@ class BranchingAttemptSource:
                     target_error=f"{type(exc).__name__}: {exc}",
                     target_reply=None,
                     matched=False,
+                    outcome="transport",
+                    normalization_evidence=None,
                     gate_request_id=None,
                 )
                 continue
@@ -257,15 +271,10 @@ class BranchingAttemptSource:
                 response_body = response.text
             reply = response_body.get("reply") if isinstance(response_body, dict) else None
             target_reply = reply if isinstance(reply, str) else None
-            normalized = (
-                self._normalize_reply(target_reply)
-                if target_reply is not None
-                else None
+            evaluation = self._evaluate_response(
+                target_reply, response.status_code, response_body
             )
-            matched = (
-                isinstance(normalized, str)
-                and self._success_regex.search(normalized) is not None
-            )
+            matched = evaluation.confirmed
             outcome = RoundCandidateOutcome(
                 planner_attempt=candidate,
                 pruned=False,
@@ -275,6 +284,8 @@ class BranchingAttemptSource:
                 target_error=None,
                 target_reply=target_reply if response.status_code == 200 else None,
                 matched=matched,
+                outcome=evaluation.outcome,
+                normalization_evidence=evaluation.normalization_evidence,
                 gate_request_id=self._parse_gate_request_id(response_body),
             )
             outcomes[index] = outcome
