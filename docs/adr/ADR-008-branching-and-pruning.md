@@ -8,8 +8,11 @@
 ADR-007's single-candidate adaptive planner can respond to campaign history,
 but a linear sequence limits tactical variety. In practice it cycled through
 contextual framings of broadly similar requests instead of reliably trying the
-output-formatting family that produced both confirmed prior findings: ASCII
+output-formatting family that was historically reported to produce ASCII
 separator formatting and Unicode-whitespace formatting of the canary marker.
+The original payloads were not retained and are not byte-exact recoverable.
+Those reports therefore are not evidence records; current normalization
+behaviour is tested only by the deliberately constructed regression corpus.
 
 ## Decision
 

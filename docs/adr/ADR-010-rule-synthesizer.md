@@ -5,11 +5,14 @@
 
 ## Context
 
-Bastion's historical LLM07 bypasses were fixed through human judgment about
-why a detector failed. The ASCII separator finding led to a normalization
-concept; the Unicode-whitespace finding broadened that concept through
-`isspace()`. Neither fix was merely an independent signature for the exact
-observed output.
+Bastion's historical LLM07 reports were addressed through human judgment about
+why a detector failed. The ASCII separator report led to a normalization
+concept; the Unicode-whitespace report broadened that concept through
+`isspace()`. The original payloads for both reports were not retained and are
+not byte-exact recoverable, so they are not evidence records and must not be
+reconstructed. Current normalization behaviour is instead covered by the
+deliberately constructed regression corpus. Neither change was merely an
+independent signature for an exact observed output.
 
 Strike now records confirmed bypass evidence, but the project needs a narrow,
 auditable path from such evidence to a human-reviewable Gate configuration

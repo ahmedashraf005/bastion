@@ -7,11 +7,14 @@
 
 Strike has now demonstrated static, linear adaptive, and branching adaptive
 campaigns, but each campaign begins without access to techniques previously
-shown to matter. The project has two genuine historical LLM07 findings—ASCII
+reported to matter. The project has two historical LLM07 reports—ASCII
 separator formatting and Unicode-whitespace formatting—both from the broader
-family of reformatting output to evade a literal-style detector. Reusing that
-knowledge must not expand Strike's target boundary or prematurely require a
-production-scale vector system.
+family of reformatting output to evade a literal-style detector. Their original
+payloads were not retained and are not byte-exact recoverable. The reports are
+not preserved finding evidence; only the new regression corpus tests the
+current normalization behaviour. Reusing the abstract technique knowledge must
+not expand Strike's target boundary or prematurely require a production-scale
+vector system.
 
 ## Decision
 
