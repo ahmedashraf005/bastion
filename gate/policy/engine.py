@@ -32,6 +32,30 @@ class PolicyEngine:
     def __init__(self, rules: list[PolicyRule]) -> None:
         self._rules = rules
 
+    @property
+    def detect_only_stream_rules(self) -> list[PolicyRule]:
+        """Return explicit output-policy exceptions to preventative streaming."""
+
+        return [
+            rule
+            for rule in self._rules
+            if rule.enabled
+            and rule.stage == "output"
+            and rule.stream_enforcement == "detect_only"
+        ]
+
+    @property
+    def requires_buffered_output_streaming(self) -> bool:
+        """Whether any enabled output policy requires pre-relay enforcement."""
+
+        return any(
+            rule.enabled
+            and rule.stage == "output"
+            and rule.action in {"block", "redact"}
+            and rule.stream_enforcement == "prevent"
+            for rule in self._rules
+        )
+
     @classmethod
     def from_yaml(cls, rules_path: Path) -> "PolicyEngine":
         """Load and validate the complete interim policy file once at startup."""

@@ -32,9 +32,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bastion.gate")
 
-RULES_PATH = Path(__file__).resolve().parent.parent / "policy" / "rules.yaml"
+RULES_PATH = settings.rules_path or (Path(__file__).resolve().parent.parent / "policy" / "rules.yaml")
 LEAK_PATTERNS_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "leak_patterns.yaml"
+)
+NORMALIZATION_VERSIONS_PATH = (
+    Path(__file__).resolve().parent.parent / "detectors" / "normalization_versions.yaml"
 )
 PII_ENTITIES_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "pii_entities.yaml"
@@ -54,6 +57,7 @@ requests_table = Table(
     Column("policy_action", Text, nullable=True),
     Column("matched_rules", JSONB, nullable=True),
     Column("detector_signals", JSONB, nullable=True),
+    Column("raw_exact_marker_match", Boolean, nullable=True),
     schema="gate",
 )
 
@@ -191,8 +195,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.database_engine = create_async_engine(settings.database_url)
     try:
         app.state.policy_engine = PolicyEngine.from_yaml(RULES_PATH)
+        for rule in app.state.policy_engine.detect_only_stream_rules:
+            logger.warning(
+                "stream_detect_only_policy policy_id=%s action=%s "
+                "risk=output_content_is_relayed_before_detection",
+                rule.id,
+                rule.action,
+            )
         app.state.system_prompt_leak_detector = SystemPromptLeakDetector.from_yaml(
-            LEAK_PATTERNS_PATH
+            LEAK_PATTERNS_PATH, NORMALIZATION_VERSIONS_PATH
         )
         app.state.presidio_pii_detector = PresidioPiiDetector.from_yaml(
             PII_ENTITIES_PATH
@@ -227,6 +238,7 @@ async def persist_request(
     policy_action: str | None = None,
     matched_rules: list[str] | None = None,
     detector_signals: list[dict[str, Any]] | None = None,
+    raw_exact_marker_match: bool | None = None,
 ) -> None:
     """Best-effort persistence that never changes the proxy response."""
 
@@ -246,6 +258,7 @@ async def persist_request(
                     policy_action=policy_action,
                     matched_rules=matched_rules,
                     detector_signals=detector_signals,
+                    raw_exact_marker_match=raw_exact_marker_match,
                 )
             )
     except Exception:
@@ -374,6 +387,10 @@ async def relay_stream(
             ]
             if output_evaluation.matched_rules:
                 persisted_policy_action = "detected_after_stream"
+                if output_signal.redacted_content is not None:
+                    message = first_assistant_message(response_body)
+                    if message is not None:
+                        message["content"] = output_signal.redacted_content
 
         persistence_arguments = {
             "request_id": request_id,
@@ -387,6 +404,7 @@ async def relay_stream(
             "policy_action": persisted_policy_action,
             "matched_rules": persisted_matched_rules,
             "detector_signals": persisted_detector_signals,
+            "raw_exact_marker_match": raw_exact_marker_match(assistant_content),
         }
         if cancellation is not None:
             asyncio.create_task(
@@ -398,6 +416,123 @@ async def relay_stream(
 
     if cancellation is not None:
         raise cancellation
+
+
+def raw_exact_marker_match(content: str) -> bool | None:
+    """Return an exact pre-redaction marker fact without retaining its value."""
+
+    marker = settings.raw_exact_marker
+    return marker in content if marker is not None else None
+
+
+def buffered_sse(response_body: dict[str, Any]) -> bytes:
+    """Return a single valid SSE completion and terminal marker after scanning."""
+
+    message = first_assistant_message(response_body) or {}
+    content = message.get("content") if isinstance(message.get("content"), str) else ""
+    chunk = {
+        "id": response_body.get("id"),
+        "object": "chat.completion.chunk",
+        "model": response_body.get("model"),
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+    }
+    return b"data: " + json.dumps(chunk, ensure_ascii=False).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+
+
+async def relay_buffered_stream(
+    request: Request,
+    *,
+    client: httpx.AsyncClient,
+    upstream_response: httpx.Response,
+    request_id: UUID,
+    model: str,
+    request_body: dict[str, Any],
+    started_at: float,
+    policy_action: str | None,
+    matched_rules: list[str] | None,
+    detector_signals: list[dict[str, Any]],
+) -> AsyncIterator[bytes]:
+    """Buffer an SSE response, apply preventative output policy, then relay SSE."""
+
+    accumulator = StreamAccumulator(request_model=model)
+    line_buffer = bytearray()
+    upstream_error: str | None = None
+    try:
+        async for raw_chunk in upstream_response.aiter_raw():
+            line_buffer.extend(raw_chunk)
+            while b"\n" in line_buffer:
+                newline_index = line_buffer.index(b"\n")
+                line = bytes(line_buffer[:newline_index]).rstrip(b"\r")
+                del line_buffer[: newline_index + 1]
+                accumulator.consume_sse_line(line)
+    except httpx.HTTPError as exc:
+        upstream_error = f"upstream stream interrupted: {exc.__class__.__name__}: {exc}"
+    finally:
+        if line_buffer:
+            accumulator.consume_sse_line(bytes(line_buffer).rstrip(b"\r"))
+        await upstream_response.aclose()
+        await client.aclose()
+
+    latency_ms = (perf_counter() - started_at) * 1000
+    response_body = accumulator.response_body()
+    message = first_assistant_message(response_body)
+    raw_content = message.get("content") if message is not None else ""
+    if not isinstance(raw_content, str):
+        raw_content = ""
+    persisted_action = policy_action
+    persisted_rules = matched_rules
+    persisted_signals = detector_signals
+    error = upstream_error
+    blocked_rule_id: str | None = None
+
+    if upstream_error is None and accumulator.terminal_seen:
+        output_signal = await request.app.state.system_prompt_leak_detector.scan(raw_content)
+        output_evaluation = request.app.state.policy_engine.evaluate([output_signal], stage="output")
+        persisted_action = output_evaluation.action or policy_action
+        persisted_rules = merge_matched_rules(matched_rules or [], output_evaluation.matched_rules)
+        persisted_signals = detector_signals + [output_signal.model_dump(mode="json")]
+        if output_evaluation.action == "block":
+            blocked_rule_id = output_evaluation.terminal_rule_id
+            response_body = {"error": "blocked by policy", "rule_id": blocked_rule_id}
+            error = f"blocked by policy: {blocked_rule_id}"
+        else:
+            redaction_match = next(
+                (
+                    match
+                    for match in output_evaluation.matches
+                    if match.action == "redact" and match.signal.redacted_content is not None
+                ),
+                None,
+            )
+            if redaction_match is not None and message is not None:
+                message["content"] = redaction_match.signal.redacted_content
+
+    await persist_request(
+        request,
+        request_id=request_id,
+        model=model,
+        stream_requested=True,
+        request_body=request_body,
+        response_body=response_body,
+        upstream_status=upstream_response.status_code,
+        latency_ms=latency_ms,
+        error=error,
+        policy_action=persisted_action,
+        matched_rules=persisted_rules,
+        detector_signals=persisted_signals,
+        raw_exact_marker_match=raw_exact_marker_match(raw_content),
+    )
+    if blocked_rule_id is not None:
+        event = {"error": {"message": "blocked by policy", "rule_id": blocked_rule_id}}
+        yield b"data: " + json.dumps(event).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+        return
+    yield buffered_sse(response_body)
 
 
 @app.get("/healthz")
@@ -538,8 +673,14 @@ async def chat_completions(request: Request) -> Response:
             )
             return response
 
+        policy_engine: PolicyEngine = request.app.state.policy_engine
+        stream_relay = (
+            relay_buffered_stream
+            if policy_engine.requires_buffered_output_streaming
+            else relay_stream
+        )
         return StreamingResponse(
-            relay_stream(
+            stream_relay(
                 request,
                 client=client,
                 upstream_response=upstream_response,
@@ -644,6 +785,7 @@ async def chat_completions(request: Request) -> Response:
             policy_action="block",
             matched_rules=merged_matched_rules,
             detector_signals=merged_detector_signals,
+            raw_exact_marker_match=raw_exact_marker_match(assistant_content),
         )
         return response
 
@@ -693,5 +835,6 @@ async def chat_completions(request: Request) -> Response:
         policy_action=output_evaluation.action or policy_result.action,
         matched_rules=merged_matched_rules,
         detector_signals=merged_detector_signals,
+        raw_exact_marker_match=raw_exact_marker_match(assistant_content),
     )
     return response

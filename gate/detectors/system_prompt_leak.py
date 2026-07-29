@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Literal
+import unicodedata
 
 import yaml
 from pydantic import BaseModel, TypeAdapter
@@ -21,6 +22,20 @@ class LeakPattern(BaseModel):
     normalize: Literal["none", "strip_separators"] = "none"
 
 
+class PromotedNormalization(BaseModel):
+    """One versioned, data-only normalizer addition approved through Strike."""
+
+    version_id: str
+    proposal_id: str
+    origin_finding_id: str
+    detector: Literal["system_prompt_leak"]
+    active: bool
+    operation: Literal["add"]
+    unicode_categories: list[str] = []
+    named_classes: list[str] = []
+    codepoints: list[str] = []
+
+
 @dataclass(frozen=True)
 class CompiledLeakPattern:
     """A validated pattern with its case-insensitive matcher compiled once."""
@@ -35,22 +50,49 @@ class SystemPromptLeakDetector:
     detector_name = "system_prompt_leak"
     _separator_characters = frozenset(" \t\n\r-_.")
 
-    def __init__(self, patterns: list[CompiledLeakPattern]) -> None:
+    def __init__(
+        self,
+        patterns: list[CompiledLeakPattern],
+        promoted_normalizations: list[PromotedNormalization] | None = None,
+    ) -> None:
         self._patterns = patterns
+        active = [item for item in promoted_normalizations or [] if item.active]
+        self._unicode_categories = frozenset(
+            category for item in active for category in item.unicode_categories
+        )
+        self._named_classes = frozenset(
+            named_class for item in active for named_class in item.named_classes
+        )
+        self._codepoints = frozenset(
+            int(codepoint[2:], 16)
+            for item in active
+            for codepoint in item.codepoints
+        )
 
     @classmethod
-    def from_yaml(cls, patterns_path: Path) -> "SystemPromptLeakDetector":
+    def from_yaml(
+        cls, patterns_path: Path, normalizations_path: Path | None = None
+    ) -> "SystemPromptLeakDetector":
         """Load and compile detector-owned patterns once at Gate startup."""
 
         with patterns_path.open(encoding="utf-8") as patterns_file:
             raw_patterns = yaml.safe_load(patterns_file)
 
         definitions = TypeAdapter(list[LeakPattern]).validate_python(raw_patterns)
-        return cls.from_definitions(definitions)
+        promoted_normalizations: list[PromotedNormalization] = []
+        if normalizations_path is not None and normalizations_path.exists():
+            with normalizations_path.open(encoding="utf-8") as normalizations_file:
+                raw_normalizations = yaml.safe_load(normalizations_file) or []
+            promoted_normalizations = TypeAdapter(
+                list[PromotedNormalization]
+            ).validate_python(raw_normalizations)
+        return cls.from_definitions(definitions, promoted_normalizations)
 
     @classmethod
     def from_definitions(
-        cls, definitions: list[LeakPattern]
+        cls,
+        definitions: list[LeakPattern],
+        promoted_normalizations: list[PromotedNormalization] | None = None,
     ) -> "SystemPromptLeakDetector":
         """Build a detector from validated definitions using Gate's live matcher logic."""
 
@@ -66,16 +108,31 @@ class SystemPromptLeakDetector:
             )
             for definition in definitions
         ]
-        return cls(patterns)
+        return cls(patterns, promoted_normalizations)
 
-    @classmethod
-    def _strip_separators_with_index_map(cls, content: str) -> tuple[str, list[int]]:
+    def _should_strip(self, character: str) -> bool:
+        return (
+            character in self._separator_characters
+            or character.isspace()
+            or unicodedata.category(character) in self._unicode_categories
+            or (
+                "unicode_whitespace" in self._named_classes
+                and character.isspace()
+            )
+            or (
+                "ascii_separators" in self._named_classes
+                and character in self._separator_characters
+            )
+            or ord(character) in self._codepoints
+        )
+
+    def _strip_separators_with_index_map(self, content: str) -> tuple[str, list[int]]:
         """Build normalized text and map each normalized character to its source index."""
 
         normalized_characters: list[str] = []
         index_map: list[int] = []
         for original_index, character in enumerate(content):
-            if character in cls._separator_characters or character.isspace():
+            if self._should_strip(character):
                 continue
             normalized_characters.append(character)
             index_map.append(original_index)

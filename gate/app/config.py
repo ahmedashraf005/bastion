@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -25,6 +26,12 @@ class Settings:
     )
     gate_port: int = int(os.getenv("GATE_PORT", "8000"))
     hf_token: str | None = os.getenv("HF_TOKEN") or None
+    raw_exact_marker: str | None = os.getenv("GATE_RAW_EXACT_MARKER") or None
+    rules_path: Path | None = (
+        Path(os.environ["GATE_RULES_PATH"]).resolve()
+        if os.getenv("GATE_RULES_PATH")
+        else None
+    )
 
 
 settings = Settings()

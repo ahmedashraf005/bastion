@@ -1,0 +1,10 @@
+- version_id: normalization-e40488d4-f3a6-427b-b1aa-62b04b0271e1
+  proposal_id: e40488d4-f3a6-427b-b1aa-62b04b0271e1
+  origin_finding_id: be3ca489-38cf-4ab0-bd40-6ada903d0c3e
+  detector: system_prompt_leak
+  active: true
+  operation: add
+  unicode_categories:
+  - Cf
+  named_classes: []
+  codepoints: []

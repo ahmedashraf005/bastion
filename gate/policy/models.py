@@ -9,6 +9,7 @@ from detectors.base import DetectorSignal
 
 PolicyAction = Literal["block", "redact", "flag", "allow"]
 PolicyStage = Literal["input", "output"]
+StreamEnforcement = Literal["prevent", "detect_only"]
 
 
 class PolicyRule(BaseModel):
@@ -22,6 +23,7 @@ class PolicyRule(BaseModel):
     matcher_type: str
     matcher_config: dict[str, Any]
     action: PolicyAction
+    stream_enforcement: StreamEnforcement = "prevent"
 
 
 class RuleMatch(BaseModel):
