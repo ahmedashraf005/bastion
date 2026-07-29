@@ -30,6 +30,9 @@ services:
 
   ollama:
     image: ollama/ollama:0.32.1
+    profiles: ["local-inference"]
+    # Conflicts with host-native Ollama on ${OLLAMA_PORT:-11434}; stop host
+    # Ollama before enabling the local-inference profile.
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
@@ -41,24 +44,45 @@ services:
       retries: 12
 
   ollama-model-init:
-    image: ollama/ollama:0.32.1
-    depends_on:
-      ollama:
-        condition: service_healthy
+    image: alpine:3.21
     environment:
-      OLLAMA_HOST: http://ollama:11434
+      # Default to host-native Ollama. For the optional containerized backend,
+      # set COMPOSE_OLLAMA_BASE_URL=http://ollama:11434 and enable
+      # local-inference.
+      OLLAMA_HOST: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
+        attempts=0
+        until wget -qO /tmp/ollama-models "$$OLLAMA_HOST/api/tags"; do
+          attempts=$$((attempts + 1))
+          if [ "$$attempts" -ge 30 ]; then
+            echo "ollama_unreachable host=$$OLLAMA_HOST attempts=$$attempts" >&2
+            exit 1
+          fi
+          echo "ollama_waiting host=$$OLLAMA_HOST attempt=$$attempts"
+          sleep 2
+        done
         for model in llama3.1:8b nomic-embed-text; do
-          if ollama list | awk 'NR > 1 { print $$1 }' | grep -F -x -e "$$model" -e "$$model:latest" >/dev/null; then
+          if grep -F -e "\"name\":\"$$model\"" -e "\"name\":\"$$model:latest\"" /tmp/ollama-models >/dev/null; then
             echo "ollama_model_present model=$$model"
           else
-            echo "ollama_model_pull_started model=$$model"
-            ollama pull "$$model"
-            echo "ollama_model_pull_completed model=$$model"
+            echo "ollama_model_missing model=$$model host=$$OLLAMA_HOST" >&2
+            exit 1
           fi
         done
+        if wget -qO /dev/null --header='Content-Type: application/json' --post-data='{"model":"llama3.1:8b","prompt":"","stream":false}' "$$OLLAMA_HOST/api/generate"; then
+          echo "ollama_model_warmed model=llama3.1:8b endpoint=/api/generate"
+        else
+          echo "warning=ollama_model_warmup_failed model=llama3.1:8b endpoint=/api/generate" >&2
+        fi
+        if wget -qO /dev/null --header='Content-Type: application/json' --post-data='{"model":"nomic-embed-text","input":"Bastion model warmup"}' "$$OLLAMA_HOST/api/embed"; then
+          echo "ollama_model_warmed model=nomic-embed-text endpoint=/api/embed"
+        else
+          echo "warning=ollama_model_warmup_failed model=nomic-embed-text endpoint=/api/embed" >&2
+        fi
 
   gate:
     build:
@@ -66,8 +90,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bastion}:${POSTGRES_PASSWORD:-bastion_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-bastion}
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       GATE_PORT: 8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,9 +166,11 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bastion}:${POSTGRES_PASSWORD:-bastion_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-bastion}
-      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       VALKEY_URL: redis://valkey:6379/0
       BASTION_CONTAINERIZED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
