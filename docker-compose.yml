@@ -1,3 +1,5 @@
+name: bastion
+
 services:
   postgres:
     image: postgres:17.10-alpine3.23
