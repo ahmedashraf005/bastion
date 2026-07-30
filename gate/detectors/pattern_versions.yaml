@@ -1,0 +1,22 @@
+- version_id: marker-ref-af44335a-9f28-4547-b857-ac7cc53d1e8a
+  proposal_id: af44335a-9f28-4547-b857-ac7cc53d1e8a
+  origin_finding_id: be3ca489-38cf-4ab0-bd40-6ada903d0c3e
+  detector: system_prompt_leak
+  active: true
+  operation: replace
+  replaces_pattern_id: example-canary-pattern
+  window_rationale: 'Empirical security parameter: 160 catches through k=6 (155 source
+    characters) while retaining 51 characters below the known 211-character benign
+    ordered-subsequence false positive; it is not a derived bound.'
+  known_residual: k>=7 density presentations exceed this window and are intentionally
+    unmatched pending separately reviewed evidence.
+  replacement:
+    id: sample-bank-configuration-marker
+    description: 'Value-anchored SampleBank configuration marker. The marker value
+      is resolved only inside Gate from marker_ref; it must never be placed here.
+
+      '
+    pattern_type: marker_ref
+    marker_ref: sample-bank.internal_configuration_marker
+    normalize: strip_separators
+    max_source_span: 160

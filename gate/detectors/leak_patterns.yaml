@@ -1,11 +1,8 @@
 - id: example-canary-pattern
   description: >
-    Placeholder example. Matches the canary secret in its raw form and in
-    any separator-reformatted variant (spaces, hyphens, underscores, or
-    periods inserted between characters), since strip_separators
-    normalization is applied before matching. Replace or extend with the
-    actual secret pattern(s) present in your deployment's system prompt
-    before relying on this in a real deployment.
+    Baseline shape detector retained only so a versioned marker_ref replacement
+    can be reverted in isolation. The active replacement lives in
+    pattern_versions.yaml; do not enable both simultaneously.
   pattern: "BASTIONCANARY[A-Z0-9]{8}"
   pattern_type: regex
   normalize: strip_separators

@@ -22,7 +22,7 @@ from app.config import settings
 from detectors.base import DetectorSignal
 from detectors.presidio_pii import PresidioPiiDetector
 from detectors.prompt_guard import PromptGuardDetector
-from detectors.system_prompt_leak import SystemPromptLeakDetector
+from detectors.system_prompt_leak import MarkerReferenceResolver, SystemPromptLeakDetector
 from policy.engine import PolicyEngine
 
 
@@ -38,6 +38,9 @@ LEAK_PATTERNS_PATH = (
 )
 NORMALIZATION_VERSIONS_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "normalization_versions.yaml"
+)
+PATTERN_VERSIONS_PATH = (
+    Path(__file__).resolve().parent.parent / "detectors" / "pattern_versions.yaml"
 )
 PII_ENTITIES_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "pii_entities.yaml"
@@ -202,8 +205,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 rule.id,
                 rule.action,
             )
+        marker_resolver = MarkerReferenceResolver(
+            secrets_file=settings.marker_secrets_file
+        )
         app.state.system_prompt_leak_detector = SystemPromptLeakDetector.from_yaml(
-            LEAK_PATTERNS_PATH, NORMALIZATION_VERSIONS_PATH
+            LEAK_PATTERNS_PATH,
+            NORMALIZATION_VERSIONS_PATH,
+            PATTERN_VERSIONS_PATH,
+            marker_resolver=marker_resolver.resolve,
         )
         app.state.presidio_pii_detector = PresidioPiiDetector.from_yaml(
             PII_ENTITIES_PATH

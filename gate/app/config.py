@@ -27,6 +27,11 @@ class Settings:
     gate_port: int = int(os.getenv("GATE_PORT", "8000"))
     hf_token: str | None = os.getenv("HF_TOKEN") or None
     raw_exact_marker: str | None = os.getenv("GATE_RAW_EXACT_MARKER") or None
+    marker_secrets_file: Path | None = (
+        Path(os.environ["GATE_MARKER_SECRETS_FILE"]).resolve()
+        if os.getenv("GATE_MARKER_SECRETS_FILE")
+        else None
+    )
     rules_path: Path | None = (
         Path(os.environ["GATE_RULES_PATH"]).resolve()
         if os.getenv("GATE_RULES_PATH")
