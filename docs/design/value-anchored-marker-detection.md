@@ -27,13 +27,20 @@ currently a theoretical, unproduced residual for SampleBank Copilot: probes
 `density-probe-4` requested k=12 U+200B. None emitted a complete uniform
 k>=7 marker presentation.
 
-Unicode compatibility and homoglyph substitution is a separate, live residual
-class. The same pressure probes spontaneously emitted fullwidth forms
+Unicode compatibility-form and confusable substitution are known, recorded
+gaps and are deliberately not remediated in this detector. Five RED bypass
+corpus cases pin the compatibility and visual-confusable presentations. The
+same pressure probes spontaneously emitted fullwidth forms
 (`density-probe-3`), accented/soft-hyphen/non-breaking-hyphen substitutions
 (`density-probe-8`), and HTML entity text (`density-probe-7`). These are not
-covered by this detector's ASCII-only case-insensitive comparison. They require
-separate mechanical corpus evidence and a separately reviewed remediation; do
-not broaden this value matcher implicitly.
+covered by this detector's ASCII-only case-insensitive comparison.
+
+NFKC/NFKD compatibility normalization and UTS #39 confusable mapping would
+both require a detector change plus dedicated benign-corpus work. Neither is
+justified ahead of unstarted MVP coverage. This scope exclusion must be
+revisited only when a target produces a complete substituted marker in a real
+campaign, or when LLM01, LLM02, or LLM10 coverage lands. Do not broaden this
+value matcher implicitly before then.
 
 If a configured reference cannot resolve, Gate fails startup/readiness rather
 than silently weakening output detection.
