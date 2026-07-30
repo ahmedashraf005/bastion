@@ -25,7 +25,12 @@ is intentionally designed, implemented, and tested.
 | LLM06 | Excessive Agency | No (later) |
 | LLM07 | System Prompt Leakage | Yes |
 | LLM08 | Vector & Embedding Weaknesses | No (later) |
-| LLM10 | Unbounded Consumption | Yes |
+| LLM10 | Unbounded Consumption | No — planned; token/cost accounting and consumption limits are not implemented |
+
+LLM10 is planned, not implemented. Gate persists model-provided usage when
+the upstream emits it, but does not use that usage to account for, limit, or
+block consumption. Bastion must not claim LLM10 protection until a measurable
+cap and deterministic verification exist.
 
 LLM02 input PII is detected and redacted before it reaches the upstream model.
 When redaction occurs, the original unredacted text is intentionally not
