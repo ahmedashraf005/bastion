@@ -40,6 +40,29 @@ Streaming responses are audited for those leaks only after the stream
 finishes; tokens already sent to the client cannot be retracted, so streaming
 is not yet protected from a leak.
 
+### Indirect prompt-injection boundary
+
+Gate's input-stage detectors inspect user-role content only: the latest user
+message for Presidio and user-role message text for Prompt Guard. Tool-role and
+assistant-role content are not input-scanned. Consequently, indirect prompt
+injection delivered through tool output or retrieved context is outside current
+Gate coverage. AgentDojo's `important_instructions` attack is the concrete
+known example: its payload is inserted into tool output, where Gate's current
+input-stage detection cannot observe it. This is a known gap, not a claim that
+the existing LLM01 policy protects indirect injection.
+
+Tool-call arguments are also not scanned by the output-stage leak detector.
+Restoring faithful tool-call SSE passthrough therefore restores an unmonitored
+egress path for canary or PII values carried in tool arguments. The earlier
+lossy stream reconstruction only closed that path by breaking protocol
+conformance; it was not a security control. Tool-argument inspection is a
+separate detection decision and is not implemented here.
+
+For responses with multiple choices, the output-stage leak detector scans only
+the first choice. Content in additional choices is unscanned. Multi-choice
+output inspection is a separate detection decision and is not implemented
+here.
+
 ## Red-team operating boundary
 
 Any future Bastion.Strike component may attack only SampleBank Copilot, the

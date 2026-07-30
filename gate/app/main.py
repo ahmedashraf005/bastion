@@ -72,6 +72,7 @@ class StreamAccumulator:
     request_model: str
     stream_id: str | None = None
     model: str | None = None
+    choice_index: int | None = None
     content_parts: list[str] = field(default_factory=list)
     finish_reason: str | None = None
     usage: Any | None = None
@@ -113,7 +114,20 @@ class StreamAccumulator:
         if not isinstance(choices, list) or not choices:
             return
 
-        choice = choices[0]
+        if self.choice_index is None:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                candidate_index = first_choice.get("index")
+                self.choice_index = candidate_index if isinstance(candidate_index, int) else 0
+
+        choice = next(
+            (
+                item
+                for item in choices
+                if isinstance(item, dict) and item.get("index") == self.choice_index
+            ),
+            None,
+        )
         if not isinstance(choice, dict):
             return
 
@@ -134,7 +148,7 @@ class StreamAccumulator:
             "model": self.model or self.request_model,
             "choices": [
                 {
-                    "index": 0,
+                    "index": self.choice_index if self.choice_index is not None else 0,
                     "message": {
                         "role": "assistant",
                         "content": "".join(self.content_parts),
@@ -434,24 +448,67 @@ def raw_exact_marker_match(content: str) -> bool | None:
     return marker in content if marker is not None else None
 
 
-def buffered_sse(response_body: dict[str, Any]) -> bytes:
-    """Return a single valid SSE completion and terminal marker after scanning."""
+def buffered_sse(
+    upstream_sse: bytes,
+    redacted_content: str | None = None,
+    redacted_choice_index: int | None = None,
+) -> bytes:
+    """Re-emit buffered SSE without losing upstream OpenAI delta fields.
 
-    message = first_assistant_message(response_body) or {}
-    content = message.get("content") if isinstance(message.get("content"), str) else ""
-    chunk = {
-        "id": response_body.get("id"),
-        "object": "chat.completion.chunk",
-        "model": response_body.get("model"),
-        "choices": [
-            {
-                "index": 0,
-                "delta": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
-            }
-        ],
-    }
-    return b"data: " + json.dumps(chunk, ensure_ascii=False).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+    Preventative output policies need the complete response before it can be
+    relayed.  When no redaction is necessary, preserving the original bytes is
+    the only faithful reconstruction: chunk boundaries, comments, provider
+    extensions, tool calls, and finish reasons all remain intact.  When a
+    redaction is necessary, alter only ``delta.content`` values while retaining
+    every other field from each upstream event.
+    """
+
+    if redacted_content is None:
+        return upstream_sse
+
+    rewritten_lines: list[bytes] = []
+    content_written = False
+    for line in upstream_sse.splitlines(keepends=True):
+        newline = b"\r\n" if line.endswith(b"\r\n") else b"\n" if line.endswith(b"\n") else b""
+        raw_line = line[: -len(newline)] if newline else line
+        if not raw_line.startswith(b"data:"):
+            rewritten_lines.append(line)
+            continue
+
+        payload = raw_line[5:].lstrip()
+        try:
+            event = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            rewritten_lines.append(line)
+            continue
+        if not isinstance(event, dict):
+            rewritten_lines.append(line)
+            continue
+
+        changed = False
+        choices = event.get("choices")
+        if isinstance(choices, list):
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                delta = choice.get("delta")
+                if (
+                    choice.get("index") != redacted_choice_index
+                    or not isinstance(delta, dict)
+                    or not isinstance(delta.get("content"), str)
+                ):
+                    continue
+                delta["content"] = redacted_content if not content_written else ""
+                content_written = True
+                changed = True
+
+        if not changed:
+            rewritten_lines.append(line)
+            continue
+        rewritten_lines.append(
+            b"data: " + json.dumps(event, ensure_ascii=False).encode("utf-8") + newline
+        )
+    return b"".join(rewritten_lines)
 
 
 async def relay_buffered_stream(
@@ -471,9 +528,11 @@ async def relay_buffered_stream(
 
     accumulator = StreamAccumulator(request_model=model)
     line_buffer = bytearray()
+    upstream_sse_chunks: list[bytes] = []
     upstream_error: str | None = None
     try:
         async for raw_chunk in upstream_response.aiter_raw():
+            upstream_sse_chunks.append(raw_chunk)
             line_buffer.extend(raw_chunk)
             while b"\n" in line_buffer:
                 newline_index = line_buffer.index(b"\n")
@@ -499,6 +558,8 @@ async def relay_buffered_stream(
     persisted_signals = detector_signals
     error = upstream_error
     blocked_rule_id: str | None = None
+    redacted_content: str | None = None
+    redacted_choice_index: int | None = None
 
     if upstream_error is None and accumulator.terminal_seen:
         output_signal = await request.app.state.system_prompt_leak_detector.scan(raw_content)
@@ -521,6 +582,8 @@ async def relay_buffered_stream(
             )
             if redaction_match is not None and message is not None:
                 message["content"] = redaction_match.signal.redacted_content
+                redacted_content = redaction_match.signal.redacted_content
+                redacted_choice_index = accumulator.choice_index
 
     await persist_request(
         request,
@@ -541,7 +604,11 @@ async def relay_buffered_stream(
         event = {"error": {"message": "blocked by policy", "rule_id": blocked_rule_id}}
         yield b"data: " + json.dumps(event).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
         return
-    yield buffered_sse(response_body)
+    yield buffered_sse(
+        b"".join(upstream_sse_chunks),
+        redacted_content,
+        redacted_choice_index,
+    )
 
 
 @app.get("/healthz")
