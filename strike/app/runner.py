@@ -1,6 +1,7 @@
 """Safety-limited execution shared by static and adaptive Strike campaigns."""
 
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -124,6 +125,67 @@ class CampaignOutcome:
     elapsed_seconds: float
 
 
+PLANNER_MODEL = "llama3.1:8b"
+
+
+def inference_route(base_url: str) -> str:
+    """Classify the resolved endpoint without rewriting or probing it."""
+
+    from urllib.parse import urlparse
+
+    hostname = (urlparse(base_url).hostname or "").lower()
+    if hostname in {"localhost", "127.0.0.1", "::1", "host.docker.internal"}:
+        return "host_native"
+    if hostname == "ollama":
+        return "compose_container"
+    return "other"
+
+
+def inference_provenance(planner_timeout_seconds: float) -> dict[str, object]:
+    """Record the configured inference context needed for timing comparisons."""
+
+    return {
+        "inference_base_url": settings.ollama_base_url,
+        "inference_route": inference_route(settings.ollama_base_url),
+        "inference_model": PLANNER_MODEL,
+        "inference_parameters": {
+            "planner_request_timeout_seconds": planner_timeout_seconds,
+            "planner_max_parse_retries": 3,
+            "prune_gate_request_timeout_seconds": planner_timeout_seconds,
+            "prune_gate_max_parse_retries": 3,
+            "synthesizer_request_timeout_seconds": settings.request_timeout_seconds,
+            "synthesizer_max_parse_retries": 3,
+        },
+    }
+
+
+def terminal_exception_values(
+    exc: Exception, persisted_attempt_count: int
+) -> dict[str, object]:
+    """Persist partial execution visibly instead of silently treating it as complete."""
+
+    return {
+        "status": "failed_after_progress" if persisted_attempt_count > 0 else "error",
+        "error_type": type(exc).__name__,
+        "error_detail": "".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)
+        ),
+        "ended_at": utc_now(),
+        "lease_expires_at": None,
+    }
+
+
+async def persisted_attempt_count(
+    connection: AsyncConnection, campaign_id: uuid.UUID
+) -> int:
+    """Count durable attempt rows when assigning a terminal failure state."""
+
+    result = await connection.execute(
+        sa.select(sa.func.count()).select_from(attempts).where(attempts.c.campaign_id == campaign_id)
+    )
+    return int(result.scalar_one())
+
+
 def load_attempts(path: Path) -> AttemptsFile:
     """Load the reviewed static attempt contract from YAML."""
 
@@ -195,7 +257,7 @@ def create_attempt_source(
         return StaticAttemptSource(attempts_file.attempts or [])
     planner = AttackerPlanner(
         ollama_base_url=settings.ollama_base_url,
-        model="llama3.1:8b",
+        model=PLANNER_MODEL,
         request_timeout_seconds=planner_request_timeout_seconds,
     )
     if attempts_file.attempt_source == "planner":
@@ -207,7 +269,7 @@ def create_attempt_source(
         planner=planner,
         prune_gate=PruneGate(
             ollama_base_url=settings.ollama_base_url,
-            model="llama3.1:8b",
+            model=PLANNER_MODEL,
             request_timeout_seconds=planner_request_timeout_seconds,
         ),
         objective=attempts_file.objective,
@@ -410,7 +472,7 @@ async def run_campaign(
     retrieved_strategy_descriptions: list[str] = []
     rule_synthesizer = RuleSynthesizer(
         ollama_base_url=settings.ollama_base_url,
-        model="llama3.1:8b",
+        model=PLANNER_MODEL,
         request_timeout_seconds=settings.request_timeout_seconds,
         forbidden_marker_values={resolved_marker.value},
     )
@@ -447,6 +509,7 @@ async def run_campaign(
     queries_used = 0
     final_status = "error"
     terminal_written = False
+    terminal_error: Exception | None = None
     history: list[AttemptRecord] = []
     sequence_number = 0
     round_number = 0
@@ -475,6 +538,7 @@ async def run_campaign(
                     max_wall_clock_seconds=max_wall_clock_seconds,
                     runner_owner_id=runner_owner_id,
                     lease_expires_at=lease_expiry(),
+                    **inference_provenance(planner_request_timeout_seconds),
                 )
             )
             await connection.commit()
@@ -510,6 +574,7 @@ async def run_campaign(
                                 before_external_call=renew_lease,
                             )
                         except PlannerGenerationError as exc:
+                            terminal_error = exc
                             final_status = "error"
                             print(
                                 "campaign_planner_error"
@@ -653,6 +718,7 @@ async def run_campaign(
                     try:
                         attempt_spec = await attempt_source.next_attempt(history)
                     except PlannerGenerationError as exc:
+                        terminal_error = exc
                         final_status = "error"
                         print(
                             "campaign_planner_error"
@@ -835,23 +901,35 @@ async def run_campaign(
                     break
 
             if not terminal_written:
+                terminal_values: dict[str, object] = {
+                    "status": final_status,
+                    "ended_at": utc_now(),
+                    "lease_expires_at": None,
+                }
+                if terminal_error is not None:
+                    terminal_values.update(
+                        terminal_exception_values(
+                            terminal_error,
+                            await persisted_attempt_count(connection, campaign_id),
+                        )
+                    )
+                    final_status = str(terminal_values["status"])
                 await update_campaign(
                     connection,
                     campaign_id,
-                    status=final_status,
-                    ended_at=utc_now(),
-                    lease_expires_at=None,
+                    **terminal_values,
                 )
                 terminal_written = True
-    except Exception:
+    except Exception as exc:
         if not terminal_written:
             async with engine.connect() as connection:
                 await update_campaign(
                     connection,
                     campaign_id,
-                    status="error",
-                    ended_at=utc_now(),
-                    lease_expires_at=None,
+                    **terminal_exception_values(
+                        exc,
+                        await persisted_attempt_count(connection, campaign_id),
+                    ),
                 )
         raise
     finally:

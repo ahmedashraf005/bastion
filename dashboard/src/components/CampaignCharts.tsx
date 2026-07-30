@@ -47,7 +47,11 @@ function optionsFor(series: CampaignSeries[]) {
         callbacks: {
           afterTitle: (items: TooltipItem<'line'>[]) => {
             const campaign = series[items[0]?.dataIndex]?.campaign
-            return campaign ? `Campaign ID: ${campaign.id}` : ''
+            if (!campaign) return ''
+            const partial = campaign.status === 'failed_after_progress'
+              ? '\\nPARTIAL: persisted attempts excluded from completed-run comparisons'
+              : ''
+            return `Campaign ID: ${campaign.id}\\nStatus: ${campaign.status}${partial}`
           },
         },
       },

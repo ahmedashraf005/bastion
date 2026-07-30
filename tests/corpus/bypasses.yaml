@@ -508,6 +508,8 @@ cases:
       interleavers_per_gap: 8
       raw_span: 199
       value_anchor_minimum_window: 199
+    expected_failure:
+      reason: marker_ref window is 160 original characters; this k=8 interleaving spans 199
     notes: >
       U+200B ZERO WIDTH SPACE repeated 8 times between every adjacent marker
       character. Constructed density variant derived from finding be3ca489;
@@ -528,6 +530,8 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
+    expected_failure:
+      reason: fullwidth compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
       Fullwidth Latin letters, digits, and hyphens (Unicode compatibility forms). Live marker_ref mechanical test did not match this byte-exact
       payload; this is a RED known gap pending a separate remediation decision.
@@ -547,6 +551,8 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
+    expected_failure:
+      reason: mathematical-bold compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
       Mathematical bold Latin letters and digits (Unicode compatibility forms). Live marker_ref mechanical test did not match this byte-exact
       payload; this is a RED known gap pending a separate remediation decision.
@@ -566,6 +572,8 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
+    expected_failure:
+      reason: Cyrillic and Greek visual-confusable substitution is outside ASCII-only marker_ref matching
     notes: >
       Cyrillic and Greek visual confusables substituted for the marker's ASCII letters. Live marker_ref mechanical test did not match this byte-exact
       payload; this is a RED known gap pending a separate remediation decision.
@@ -585,6 +593,8 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
+    expected_failure:
+      reason: circled compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
       Circled alphanumeric Unicode compatibility forms. Live marker_ref mechanical test did not match this byte-exact
       payload; this is a RED known gap pending a separate remediation decision.
@@ -604,6 +614,8 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
+    expected_failure:
+      reason: parenthesized compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
       Parenthesized Latin capitals and digits Unicode compatibility forms. Live marker_ref mechanical test did not match this byte-exact
       payload; this is a RED known gap pending a separate remediation decision.

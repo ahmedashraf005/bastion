@@ -38,7 +38,8 @@ class _FakeResponse:
                         },
                         "description": "Contains BASTION-CANARY-7K2M9QX4",
                         "blast_radius": {
-                            "affected_input_classes": ["marker output"],
+                            "affected_stage": "output",
+                            "affected_classes": ["marker output"],
                             "expected_false_positive_risk": "low",
                             "rationale": "test",
                             "benign_corpus_required": False,
@@ -164,7 +165,8 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
                     },
                     "description": "test",
                     "blast_radius": {
-                        "affected_input_classes": ["test"],
+                        "affected_stage": "output",
+                        "affected_classes": ["test"],
                         "expected_false_positive_risk": "low",
                         "rationale": "test",
                         "benign_corpus_required": False,
@@ -186,7 +188,8 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
                     },
                     "description": "test",
                     "blast_radius": {
-                        "affected_input_classes": ["test"],
+                        "affected_stage": "output",
+                        "affected_classes": ["test"],
                         "expected_false_positive_risk": "low",
                         "rationale": "test",
                         "benign_corpus_required": False,
@@ -202,7 +205,8 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
             normalization=AdditiveNormalization(operation="add", unicode_categories=["Cf"]),
             description="test",
             blast_radius=BlastRadiusReport(
-                affected_input_classes=["format characters"],
+                affected_stage="output",
+                affected_classes=["format characters"],
                 expected_false_positive_risk="medium",
                 rationale="test",
                 benign_corpus_required=True,
@@ -229,7 +233,8 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
             },
             "description": "no-op",
             "blast_radius": {
-                "affected_input_classes": ["whitespace"],
+                "affected_stage": "output",
+                "affected_classes": ["whitespace"],
                 "expected_false_positive_risk": "low",
                 "rationale": "test",
                 "benign_corpus_required": True,
@@ -272,7 +277,8 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
             ),
             description="partial",
             blast_radius=BlastRadiusReport(
-                affected_input_classes=["format characters"],
+                affected_stage="output",
+                affected_classes=["format characters"],
                 expected_false_positive_risk="medium",
                 rationale="test",
                 benign_corpus_required=True,
@@ -285,3 +291,24 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
         self.assertEqual(
             proposal.blast_radius.existing_normalization_overlap, ["codepoint:U+00A0"]
         )
+
+    def test_output_stage_proposal_rejects_input_only_classes(self) -> None:
+        with self.assertRaisesRegex(
+            ValidationError, "output_stage_cannot_report_input_only_classes"
+        ):
+            PROPOSAL_ADAPTER.validate_python(
+                {
+                    "proposal_type": "normalization",
+                    "proposal_schema_version": 1,
+                    "detector": "system_prompt_leak",
+                    "normalization": {"operation": "add", "unicode_categories": ["Cf"]},
+                    "description": "incorrect direction",
+                    "blast_radius": {
+                        "affected_stage": "output",
+                        "affected_classes": ["user_input"],
+                        "expected_false_positive_risk": "high",
+                        "rationale": "test",
+                        "benign_corpus_required": True,
+                    },
+                }
+            )

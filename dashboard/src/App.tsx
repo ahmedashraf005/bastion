@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { controlApi } from './api/client'
 import type { AttemptSummary, CampaignSummary, FindingSummary, GateRequestSummary, ProposedRuleSummary, StatsSummary } from './api/types'
 import { AttackSuccessChart, AttemptsBreakdownChart, type CampaignSeries } from './components/CampaignCharts'
+import { CampaignStatusPanel } from './components/CampaignStatusPanel'
 import { FindingsTable } from './components/FindingsTable'
 import { LogPanel } from './components/LogPanel'
 import { RadarPanel } from './components/RadarPanel'
@@ -36,6 +37,9 @@ export default function App() {
   const snapshot = data
   const isLive = snapshot !== null && error === null
   const campaignSeries: CampaignSeries[] = (snapshot?.campaigns ?? []).slice().reverse().map((campaign) => ({ campaign, attempts: snapshot?.attemptsByCampaign[campaign.id] ?? [] }))
+  // A partial run has valid diagnostic attempts, but is not a completed-run
+  // measurement. Keep it in the status panel and omit it from aggregate charts.
+  const completedCampaignSeries = campaignSeries.filter(({ campaign }) => campaign.status !== 'failed_after_progress')
 
   return (
     <div className="dashboard-shell">
@@ -52,13 +56,14 @@ export default function App() {
       <main>
         <StatsRow stats={snapshot?.stats ?? null} />
         <div className="dashboard-grid charts-grid">
-          <AttackSuccessChart series={campaignSeries} />
-          <AttemptsBreakdownChart series={campaignSeries} />
+          <AttackSuccessChart series={completedCampaignSeries} />
+          <AttemptsBreakdownChart series={completedCampaignSeries} />
         </div>
         <div className="dashboard-grid operational-grid">
           <RadarPanel findings={snapshot?.findings ?? []} campaigns={snapshot?.campaigns ?? []} />
           <LogPanel requests={snapshot?.requests ?? []} />
         </div>
+        <CampaignStatusPanel campaigns={snapshot?.campaigns ?? []} />
         <FindingsTable findings={snapshot?.findings ?? []} rules={snapshot?.rules ?? []} />
       </main>
     </div>

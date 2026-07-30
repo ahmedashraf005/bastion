@@ -26,11 +26,19 @@ BENIGN_CORPUS_PATH = Path(__file__).resolve().parents[2] / "tests/corpus/benign.
 class BlastRadiusReport(BaseModel):
     """Required LLM-authored review surface; it never executes policy logic."""
 
-    affected_input_classes: list[str] = Field(min_length=1)
+    affected_stage: Literal["input", "output", "both"]
+    affected_classes: list[str] = Field(min_length=1)
     expected_false_positive_risk: Literal["low", "medium", "high"]
     rationale: str = Field(min_length=1)
     benign_corpus_required: bool
     existing_normalization_overlap: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def reject_input_only_classes_for_output_stage(self) -> "BlastRadiusReport":
+        input_only = {"user_input", "request_body", "retrieved_context", "tool_request"}
+        if self.affected_stage == "output" and input_only.intersection(self.affected_classes):
+            raise ValueError("output_stage_cannot_report_input_only_classes")
+        return self
 
 
 class SignatureSpec(BaseModel):
@@ -96,6 +104,12 @@ class NormalizationProposal(BaseModel):
     description: str = Field(min_length=1)
     blast_radius: BlastRadiusReport
 
+    @model_validator(mode="after")
+    def require_output_stage_for_output_detector(self) -> "NormalizationProposal":
+        if self.blast_radius.affected_stage == "input":
+            raise ValueError("system_prompt_leak_requires_output_or_both_stage")
+        return self
+
 
 class DetectorConfigProposal(BaseModel):
     proposal_type: Literal["detector_config"]
@@ -105,6 +119,12 @@ class DetectorConfigProposal(BaseModel):
     signature: SignatureSpec
     description: str = Field(min_length=1)
     blast_radius: BlastRadiusReport
+
+    @model_validator(mode="after")
+    def require_output_stage_for_output_detector(self) -> "DetectorConfigProposal":
+        if self.blast_radius.affected_stage == "input":
+            raise ValueError("system_prompt_leak_requires_output_or_both_stage")
+        return self
 
 
 Proposal = Annotated[

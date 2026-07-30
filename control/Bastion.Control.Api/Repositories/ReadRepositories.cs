@@ -15,7 +15,8 @@ public sealed class CampaignReadRepository(string connectionString)
         const string sql = """
             SELECT id, objective, owasp_id AS OwaspId, target_key AS TargetKey, status,
                    started_at AS StartedAt, ended_at AS EndedAt, max_queries AS MaxQueries,
-                   queries_used AS QueriesUsed, max_wall_clock_seconds AS MaxWallClockSeconds
+                   queries_used AS QueriesUsed, max_wall_clock_seconds AS MaxWallClockSeconds,
+                   error_type AS ErrorType, error_detail AS ErrorDetail
             FROM strike.campaigns
             ORDER BY started_at DESC
             LIMIT @Limit;
@@ -30,7 +31,8 @@ public sealed class CampaignReadRepository(string connectionString)
         const string sql = """
             SELECT id, objective, owasp_id AS OwaspId, target_key AS TargetKey, status,
                    started_at AS StartedAt, ended_at AS EndedAt, max_queries AS MaxQueries,
-                   queries_used AS QueriesUsed, max_wall_clock_seconds AS MaxWallClockSeconds
+                   queries_used AS QueriesUsed, max_wall_clock_seconds AS MaxWallClockSeconds,
+                   error_type AS ErrorType, error_detail AS ErrorDetail
             FROM strike.campaigns
             WHERE id = @Id;
             """;

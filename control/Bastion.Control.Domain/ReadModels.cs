@@ -12,6 +12,10 @@ public sealed class CampaignSummary
     public int MaxQueries { get; init; }
     public int QueriesUsed { get; init; }
     public int MaxWallClockSeconds { get; init; }
+    public string? ErrorType { get; init; }
+    // Local-only diagnostic: may contain payload text. It is intentionally
+    // absent from report/export contracts.
+    public string? ErrorDetail { get; init; }
 }
 
 public sealed class FindingSummary

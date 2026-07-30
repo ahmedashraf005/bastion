@@ -9,6 +9,9 @@ export type CampaignSummary = {
   maxQueries: number
   queriesUsed: number
   maxWallClockSeconds: number
+  errorType: string | null
+  // Local dashboard diagnostic only. Campaign report/export types do not use it.
+  errorDetail: string | null
 }
 
 export type AttemptSummary = {

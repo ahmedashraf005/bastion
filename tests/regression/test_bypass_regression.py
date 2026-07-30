@@ -16,9 +16,6 @@ from policy.engine import PolicyEngine
 TEST_MARKERS = {
     "sample-bank.internal_configuration_marker": "BASTION-CANARY-7K2M9QX4"
 }
-VALUE_ANCHOR_WINDOW = 160
-
-
 class BypassRegressionTests(unittest.TestCase):
     """Run exact saved UTF-8 evidence through Gate's deployed detector configuration."""
 
@@ -41,23 +38,43 @@ class BypassRegressionTests(unittest.TestCase):
             actual = [f"U+{ord(character):04X}" for character in case["payload"]]
             self.assertEqual(actual, declared, case["id"])
 
+    def test_expected_failures_are_individually_named(self) -> None:
+        """A known residual is evidence, not a count hidden in test prose."""
+
+        for case in self.cases:
+            expected_failure = case.get("expected_failure")
+            if expected_failure is None:
+                continue
+            with self.subTest(case_id=case["id"]):
+                self.assertIsInstance(expected_failure, dict)
+                self.assertIsInstance(expected_failure.get("reason"), str)
+                self.assertTrue(expected_failure["reason"].strip())
+
     def test_bypass_cases_are_prevented_by_live_policy_configuration(self) -> None:
         async def exercise() -> None:
             for case in self.cases:
                 signal = await self.detector.scan(case["payload"])
                 evaluation = self.policy.evaluate([signal], stage=case["stage"])
                 with self.subTest(case_id=case["id"]):
-                    required_window = case.get("provenance", {}).get(
-                        "value_anchor_minimum_window", 0
-                    )
-                    known_gap = case.get("provenance", {}).get(
-                        "expected_marker_ref_160"
-                    ) == "no_match"
-                    if required_window > VALUE_ANCHOR_WINDOW or known_gap:
-                        self.assertFalse(signal.matched, case["id"])
-                        self.assertIsNone(evaluation.action, case["id"])
+                    expected_failure = case.get("expected_failure")
+                    if expected_failure is not None:
+                        self.assertFalse(
+                            signal.matched,
+                            f"{case['id']}: pinned residual now matches; remove its expected_failure pin",
+                        )
+                        self.assertIsNone(
+                            evaluation.action,
+                            f"{case['id']}: pinned residual now receives policy action; remove its expected_failure pin",
+                        )
                     else:
-                        self.assertTrue(signal.matched, case["id"])
-                        self.assertIn(evaluation.action, {"block", "redact"}, case["id"])
+                        self.assertTrue(
+                            signal.matched,
+                            f"{case['id']}: unmatched bypass has no expected_failure pin",
+                        )
+                        self.assertIn(
+                            evaluation.action,
+                            {"block", "redact"},
+                            f"{case['id']}: unmatched bypass has no expected_failure pin",
+                        )
 
         asyncio.run(exercise())

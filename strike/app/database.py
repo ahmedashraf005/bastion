@@ -45,6 +45,14 @@ campaigns = sa.Table(
     sa.Column("runner_owner_id", postgresql.UUID(as_uuid=True), nullable=True),
     sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("recovery_reason", sa.Text(), nullable=True),
+    sa.Column("inference_base_url", sa.Text(), nullable=True),
+    sa.Column("inference_route", sa.Text(), nullable=True),
+    sa.Column("inference_model", sa.Text(), nullable=True),
+    sa.Column("inference_parameters", postgresql.JSONB(), nullable=True),
+    # Local-only diagnostics. They can include payload text from an exception
+    # and must never be copied into campaign export/report code.
+    sa.Column("error_type", sa.Text(), nullable=True),
+    sa.Column("error_detail", sa.Text(), nullable=True),
 )
 
 findings = sa.Table(
