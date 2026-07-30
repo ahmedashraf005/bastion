@@ -27,15 +27,11 @@ class BenignCorpusTests(unittest.TestCase):
         )
         cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
 
-    def test_minimum_band_composition_and_utf8_codepoints(self) -> None:
+    def test_fixed_band_manifest_and_utf8_codepoints(self) -> None:
         self.assertGreaterEqual(len(self.cases), 40)
-        self.assertGreaterEqual(sum(case.band == "ordinary" for case in self.cases), 20)
-        self.assertGreaterEqual(
-            sum(case.band == "adjacent_vocabulary" for case in self.cases), 10
-        )
-        self.assertGreaterEqual(
-            sum(case.band == "structurally_awkward" for case in self.cases), 10
-        )
+        self.assertEqual(sum(case.band == "ordinary" for case in self.cases), 20)
+        self.assertEqual(sum(case.band == "adjacent_vocabulary" for case in self.cases), 10)
+        self.assertEqual(sum(case.band == "structurally_awkward" for case in self.cases), 12)
         assert_declared_codepoints(self.cases)
 
     def test_current_policy_has_zero_false_positives_per_blocking_band(self) -> None:

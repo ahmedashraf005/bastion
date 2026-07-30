@@ -85,6 +85,18 @@ def load_corpus(path: Path) -> list[CorpusCase]:
             )
         )
         seen_ids.add(case_id)
+    if path.name == "benign.yaml":
+        manifest = raw.get("band_manifest")
+        if not isinstance(manifest, dict) or set(manifest) != BENIGN_BANDS:
+            raise ValueError(f"{path}: benign corpus requires a complete band_manifest")
+        if any(type(count) is not int or count < 0 for count in manifest.values()):
+            raise ValueError(f"{path}: band_manifest counts must be non-negative integers")
+        actual_counts = Counter(case.band for case in cases)
+        declared_counts = {band: manifest[band] for band in BENIGN_BANDS}
+        if actual_counts != declared_counts:
+            raise ValueError(
+                f"{path}: band_manifest {declared_counts} != actual {dict(actual_counts)}"
+            )
     return cases
 
 

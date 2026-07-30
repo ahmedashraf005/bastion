@@ -1,4 +1,8 @@
 version: 1
+band_manifest:
+  ordinary: 20
+  adjacent_vocabulary: 10
+  structurally_awkward: 12
 cases:
   - id: ordinary-balance-001
     band: ordinary
