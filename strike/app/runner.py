@@ -1,5 +1,6 @@
 """Safety-limited execution shared by static and adaptive Strike campaigns."""
 
+import math
 import time
 import traceback
 import uuid
@@ -56,6 +57,8 @@ class AttemptsFile(BaseModel):
     branching_factor: int | None = None
     beam_width: int | None = None
     planner_request_timeout_seconds: float | None = Field(default=None, gt=0)
+    max_queries: int | None = Field(default=None, gt=0)
+    max_wall_clock_seconds: int | None = Field(default=None, gt=0)
     use_strategy_library: bool = False
     strategy_retrieval_k: int = 3
 
@@ -126,6 +129,12 @@ class CampaignOutcome:
 
 
 PLANNER_MODEL = "llama3.1:8b"
+DEFAULT_MAX_QUERIES = 50
+DEFAULT_MAX_WALL_CLOCK_SECONDS = 300
+# Measured from campaign 3fad81c5: 194.846 seconds for ten target queries.
+OBSERVED_TARGET_QUERY_SECONDS = 19.4846
+# Later branching rounds grew by approximately this amount as history accumulated.
+OBSERVED_PLANNER_ROUND_DRIFT_SECONDS = 1.4
 
 
 def inference_route(base_url: str) -> str:
@@ -156,6 +165,31 @@ def inference_provenance(planner_timeout_seconds: float) -> dict[str, object]:
             "synthesizer_request_timeout_seconds": settings.request_timeout_seconds,
             "synthesizer_max_parse_retries": 3,
         },
+    }
+
+
+def feasibility_estimate(
+    attempts_file: AttemptsFile, max_queries: int
+) -> dict[str, float | int]:
+    """Estimate campaign duration from the recorded preflight measurement.
+
+    This is an operator-facing estimate, not a scheduling guard: target and
+    planner behavior can still vary at runtime.
+    """
+
+    queries_per_round = (
+        attempts_file.beam_width if attempts_file.attempt_source == "branching" else 1
+    )
+    expected_rounds = math.ceil(max_queries / (queries_per_round or 1))
+    drift_seconds = (
+        OBSERVED_PLANNER_ROUND_DRIFT_SECONDS * expected_rounds * (expected_rounds - 1) / 2
+    )
+    query_seconds = OBSERVED_TARGET_QUERY_SECONDS * max_queries
+    return {
+        "expected_rounds": expected_rounds,
+        "query_seconds": query_seconds,
+        "drift_seconds": drift_seconds,
+        "total_seconds": query_seconds + drift_seconds,
     }
 
 
@@ -420,8 +454,8 @@ async def persist_attempt(
 async def run_campaign(
     target_key: str,
     attempts_path: Path,
-    max_queries: int,
-    max_wall_clock_seconds: int,
+    max_queries: int | None,
+    max_wall_clock_seconds: int | None,
 ) -> CampaignOutcome:
     """Run a bounded static campaign against one reviewed allowlisted target."""
 
@@ -434,12 +468,21 @@ async def run_campaign(
             + ", ".join(ALLOWED_TARGETS)
         )
 
+    attempts_file = load_attempts(attempts_path)
+    max_queries = (
+        max_queries
+        if max_queries is not None
+        else attempts_file.max_queries or DEFAULT_MAX_QUERIES
+    )
+    max_wall_clock_seconds = (
+        max_wall_clock_seconds
+        if max_wall_clock_seconds is not None
+        else attempts_file.max_wall_clock_seconds or DEFAULT_MAX_WALL_CLOCK_SECONDS
+    )
     if max_queries <= 0:
         raise ValueError("max_queries must be greater than zero")
     if max_wall_clock_seconds <= 0:
         raise ValueError("max_wall_clock_seconds must be greater than zero")
-
-    attempts_file = load_attempts(attempts_path)
     # Resolve before any database or network action. The resulting value stays
     # inside this scorer closure and is never passed to an LLM-facing object.
     resolved_marker = resolve_marker_ref(attempts_file.success.marker_ref)
@@ -521,6 +564,18 @@ async def run_campaign(
         f" max_wall_clock_seconds={max_wall_clock_seconds}"
         f" reconciled_expired_campaigns={reconciled_campaigns}"
         f" planner_request_timeout_seconds={planner_request_timeout_seconds}"
+    )
+    estimate = feasibility_estimate(attempts_file, max_queries)
+    print(
+        "campaign_feasibility_estimate"
+        f" campaign_id={campaign_id} max_queries={max_queries}"
+        f" observed_target_query_seconds={OBSERVED_TARGET_QUERY_SECONDS:.4f}"
+        f" expected_rounds={estimate['expected_rounds']}"
+        f" estimated_query_seconds={estimate['query_seconds']:.3f}"
+        f" estimated_planner_drift_seconds={estimate['drift_seconds']:.3f}"
+        f" estimated_total_seconds={estimate['total_seconds']:.3f}"
+        f" max_wall_clock_seconds={max_wall_clock_seconds}"
+        f" estimated_headroom_seconds={max_wall_clock_seconds - estimate['total_seconds']:.3f}"
     )
 
     try:

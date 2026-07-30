@@ -13,8 +13,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a reviewed Strike campaign")
     parser.add_argument("--target", required=True, help="reviewed target allowlist key")
     parser.add_argument("--attempts", required=True, type=Path, help="attempts YAML file")
-    parser.add_argument("--max-queries", type=int, default=50)
-    parser.add_argument("--max-wall-clock-seconds", type=int, default=300)
+    parser.add_argument(
+        "--max-queries",
+        type=int,
+        help="override the campaign YAML limit (default: YAML value, else 50)",
+    )
+    parser.add_argument(
+        "--max-wall-clock-seconds",
+        type=int,
+        help="override the campaign YAML limit (default: YAML value, else 300)",
+    )
     return parser.parse_args()
 
 
