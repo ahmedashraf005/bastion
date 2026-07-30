@@ -1,6 +1,7 @@
 """Safety-limited execution shared by static and adaptive Strike campaigns."""
 
 import math
+import os
 import time
 import traceback
 import uuid
@@ -41,6 +42,7 @@ from .success_contract import (
     classify_target_response,
     resolve_marker_ref,
 )
+from gate.app.policy_profile import active_manifest_version, resolve_policy_profile
 from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
 from strike.planner.strategy_library import StrategyLibrary
 from strike.synthesizer.rule_synthesizer import FindingEvidence, RuleSynthesizer
@@ -165,6 +167,22 @@ def inference_provenance(planner_timeout_seconds: float) -> dict[str, object]:
             "synthesizer_request_timeout_seconds": settings.request_timeout_seconds,
             "synthesizer_max_parse_retries": 3,
         },
+    }
+
+
+def active_gate_manifest_versions() -> dict[str, str | None]:
+    """Read the two active Gate version IDs used by the campaign target.
+
+    These are the same ``active`` manifest entries Gate applies at startup;
+    a campaign refuses to begin when either manifest is absent or ambiguous.
+    """
+
+    profile = resolve_policy_profile(os.getenv("GATE_POLICY_PROFILE") or None)
+    return {
+        "gate_normalization_version_id": active_manifest_version(
+            profile.normalization_versions
+        ),
+        "gate_pattern_version_id": active_manifest_version(profile.pattern_versions),
     }
 
 
@@ -486,6 +504,7 @@ async def run_campaign(
     # Resolve before any database or network action. The resulting value stays
     # inside this scorer closure and is never passed to an LLM-facing object.
     resolved_marker = resolve_marker_ref(attempts_file.success.marker_ref)
+    gate_manifest_versions = active_gate_manifest_versions()
     planner_request_timeout_seconds = (
         attempts_file.planner_request_timeout_seconds
         or settings.planner_request_timeout_seconds
@@ -594,6 +613,7 @@ async def run_campaign(
                     runner_owner_id=runner_owner_id,
                     lease_expires_at=lease_expiry(),
                     **inference_provenance(planner_request_timeout_seconds),
+                    **gate_manifest_versions,
                 )
             )
             await connection.commit()

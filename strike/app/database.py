@@ -49,6 +49,8 @@ campaigns = sa.Table(
     sa.Column("inference_route", sa.Text(), nullable=True),
     sa.Column("inference_model", sa.Text(), nullable=True),
     sa.Column("inference_parameters", postgresql.JSONB(), nullable=True),
+    sa.Column("gate_normalization_version_id", sa.Text(), nullable=True),
+    sa.Column("gate_pattern_version_id", sa.Text(), nullable=True),
     # Local-only diagnostics. They can include payload text from an exception
     # and must never be copied into campaign export/report code.
     sa.Column("error_type", sa.Text(), nullable=True),

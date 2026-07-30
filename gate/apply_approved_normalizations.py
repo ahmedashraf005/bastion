@@ -14,11 +14,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 try:
     from app.config import settings
+    from app.policy_profile import resolve_policy_profile
 except ModuleNotFoundError:
     from gate.app.config import settings
+    from gate.app.policy_profile import resolve_policy_profile
 
 
-NORMALIZATIONS_PATH = Path(__file__).resolve().parent / "detectors/normalization_versions.yaml"
+NORMALIZATIONS_PATH = resolve_policy_profile(
+    settings.policy_profile, settings.rules_path
+).normalization_versions
 metadata = sa.MetaData(schema="strike")
 normalization_proposals = sa.Table(
     "normalization_proposals",

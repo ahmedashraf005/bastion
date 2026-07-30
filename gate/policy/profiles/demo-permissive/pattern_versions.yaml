@@ -1,0 +1,21 @@
+- version_id: marker-ref-demo-permissive-v1
+  proposal_id: demo-permissive-marker-normalization-disabled
+  origin_finding_id: demo-permissive-profile
+  detector: system_prompt_leak
+  active: true
+  operation: replace
+  replaces_pattern_id: example-canary-pattern
+  window_rationale: >
+    Demo-only copy of the reviewed 160-character marker window. The deliberately
+    weakened behavior is normalize: none, not a change to the window.
+  known_residual: >
+    This profile intentionally permits separator and Unicode-whitespace marker
+    formatting to demonstrate the detect-propose-harden loop. Never use it for
+    real traffic.
+  replacement:
+    id: sample-bank-configuration-marker
+    description: Deliberately unnormalized marker detector for the demo only.
+    pattern_type: marker_ref
+    marker_ref: sample-bank.internal_configuration_marker
+    normalize: none
+    max_source_span: 160

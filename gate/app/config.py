@@ -37,6 +37,7 @@ class Settings:
         if os.getenv("GATE_RULES_PATH")
         else None
     )
+    policy_profile: str | None = os.getenv("GATE_POLICY_PROFILE") or None
 
 
 settings = Settings()

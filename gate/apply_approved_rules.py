@@ -17,12 +17,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 try:
     from app.config import settings
+    from app.policy_profile import resolve_policy_profile
 except ModuleNotFoundError:  # Supports `python gate/apply_approved_rules.py` at repo root.
     from gate.app.config import settings
+    from gate.app.policy_profile import resolve_policy_profile
 
 
-GATE_ROOT = Path(__file__).resolve().parent
-PATTERNS_PATH = GATE_ROOT / "detectors/leak_patterns.yaml"
+PATTERNS_PATH = resolve_policy_profile(
+    settings.policy_profile, settings.rules_path
+).leak_patterns
 metadata = sa.MetaData(schema="strike")
 proposed_rules = sa.Table(
     "proposed_rules",

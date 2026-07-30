@@ -94,6 +94,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bastion}:${POSTGRES_PASSWORD:-bastion_dev_password_change_me}@postgres:5432/${POSTGRES_DB:-bastion}
       OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       GATE_PORT: 8000
+      GATE_POLICY_PROFILE: ${GATE_POLICY_PROFILE:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -171,6 +172,7 @@ services:
       OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       VALKEY_URL: redis://valkey:6379/0
       BASTION_CONTAINERIZED: "true"
+      GATE_POLICY_PROFILE: ${GATE_POLICY_PROFILE:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

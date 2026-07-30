@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 
 from strike.app.runner import (
+    active_gate_manifest_versions,
     feasibility_estimate,
     inference_route,
     load_attempts,
@@ -49,3 +50,12 @@ class CampaignTerminalErrorTests(unittest.TestCase):
         self.assertAlmostEqual(estimate["drift_seconds"], 63.0)
         self.assertAlmostEqual(estimate["total_seconds"], 452.692)
         self.assertLess(estimate["total_seconds"], attempts_file.max_wall_clock_seconds or 0)
+
+    def test_active_gate_manifest_versions_are_recordable_independently(self) -> None:
+        self.assertEqual(
+            active_gate_manifest_versions(),
+            {
+                "gate_normalization_version_id": "normalization-e40488d4-f3a6-427b-b1aa-62b04b0271e1",
+                "gate_pattern_version_id": "marker-ref-af44335a-9f28-4547-b857-ac7cc53d1e8a",
+            },
+        )

@@ -19,6 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
+from app.policy_profile import active_manifest_version, resolve_policy_profile
 from detectors.base import DetectorSignal
 from detectors.presidio_pii import PresidioPiiDetector
 from detectors.prompt_guard import PromptGuardDetector
@@ -32,16 +33,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bastion.gate")
 
-RULES_PATH = settings.rules_path or (Path(__file__).resolve().parent.parent / "policy" / "rules.yaml")
-LEAK_PATTERNS_PATH = (
-    Path(__file__).resolve().parent.parent / "detectors" / "leak_patterns.yaml"
-)
-NORMALIZATION_VERSIONS_PATH = (
-    Path(__file__).resolve().parent.parent / "detectors" / "normalization_versions.yaml"
-)
-PATTERN_VERSIONS_PATH = (
-    Path(__file__).resolve().parent.parent / "detectors" / "pattern_versions.yaml"
-)
+POLICY_PROFILE = resolve_policy_profile(settings.policy_profile, settings.rules_path)
+RULES_PATH = POLICY_PROFILE.rules
+LEAK_PATTERNS_PATH = POLICY_PROFILE.leak_patterns
+NORMALIZATION_VERSIONS_PATH = POLICY_PROFILE.normalization_versions
+PATTERN_VERSIONS_PATH = POLICY_PROFILE.pattern_versions
 PII_ENTITIES_PATH = (
     Path(__file__).resolve().parent.parent / "detectors" / "pii_entities.yaml"
 )
@@ -211,6 +207,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.database_engine = create_async_engine(settings.database_url)
     try:
+        logger.info(
+            "gate_policy_profile_loaded profile=%s rules_path=%s leak_patterns_path=%s "
+            "normalization_versions_path=%s normalization_version_id=%s "
+            "pattern_versions_path=%s pattern_version_id=%s",
+            POLICY_PROFILE.name,
+            RULES_PATH,
+            LEAK_PATTERNS_PATH,
+            NORMALIZATION_VERSIONS_PATH,
+            active_manifest_version(NORMALIZATION_VERSIONS_PATH),
+            PATTERN_VERSIONS_PATH,
+            active_manifest_version(PATTERN_VERSIONS_PATH),
+        )
         app.state.policy_engine = PolicyEngine.from_yaml(RULES_PATH)
         for rule in app.state.policy_engine.detect_only_stream_rules:
             logger.warning(
@@ -612,10 +620,15 @@ async def relay_buffered_stream(
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, str]:
+async def healthz() -> dict[str, str | None]:
     """Return a basic liveness response without contacting the upstream."""
 
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "policy_profile": POLICY_PROFILE.name,
+        "normalization_version_id": active_manifest_version(NORMALIZATION_VERSIONS_PATH),
+        "pattern_version_id": active_manifest_version(PATTERN_VERSIONS_PATH),
+    }
 
 
 @app.post("/v1/chat/completions")

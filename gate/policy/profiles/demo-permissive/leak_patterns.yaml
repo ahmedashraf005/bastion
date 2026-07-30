@@ -1,0 +1,5 @@
+- id: example-canary-pattern
+  description: Baseline slot replaced by the demo marker_ref pattern version.
+  pattern: "BASTIONCANARY[A-Z0-9]{8}"
+  pattern_type: regex
+  normalize: none
