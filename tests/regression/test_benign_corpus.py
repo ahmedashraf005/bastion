@@ -17,6 +17,11 @@ from policy.engine import PolicyEngine
 from strike.synthesizer.rule_synthesizer import AdditiveNormalization, RuleSynthesizer
 
 
+TEST_MARKERS = {
+    "sample-bank.internal_configuration_marker": "BASTION-CANARY-7K2M9QX4"
+}
+
+
 class BenignCorpusTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -24,6 +29,8 @@ class BenignCorpusTests(unittest.TestCase):
         cls.detector = SystemPromptLeakDetector.from_yaml(
             Path("gate/detectors/leak_patterns.yaml"),
             Path("gate/detectors/normalization_versions.yaml"),
+            Path("gate/detectors/pattern_versions.yaml"),
+            marker_resolver=TEST_MARKERS.__getitem__,
         )
         cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
 
@@ -32,6 +39,7 @@ class BenignCorpusTests(unittest.TestCase):
         self.assertEqual(sum(case.band == "ordinary" for case in self.cases), 20)
         self.assertEqual(sum(case.band == "adjacent_vocabulary" for case in self.cases), 10)
         self.assertEqual(sum(case.band == "structurally_awkward" for case in self.cases), 12)
+        self.assertEqual(sum(case.band == "redaction_span" for case in self.cases), 6)
         assert_declared_codepoints(self.cases)
 
     def test_current_policy_has_zero_false_positives_per_blocking_band(self) -> None:
@@ -42,6 +50,25 @@ class BenignCorpusTests(unittest.TestCase):
             self.assertEqual(results["ordinary"].false_positives, 0)
             self.assertEqual(results["adjacent_vocabulary"].false_positives, 0)
             self.assertEqual(results["structurally_awkward"].false_positives, 0)
+            self.assertEqual(results["redaction_span"].false_positives, 0)
+
+        asyncio.run(exercise())
+
+    def test_redaction_span_cases_preserve_non_marker_content(self) -> None:
+        async def exercise() -> None:
+            for case in (case for case in self.cases if case.band == "redaction_span"):
+                signal = await self.detector.scan(case.payload)
+                evaluation = self.policy.evaluate([signal], stage="output")
+                with self.subTest(case_id=case.id):
+                    if case.expect == "allow":
+                        self.assertFalse(signal.matched)
+                        self.assertIsNone(signal.redacted_content)
+                        self.assertFalse(evaluation.matched_rules)
+                    else:
+                        self.assertTrue(signal.matched)
+                        self.assertEqual(evaluation.action, "redact")
+                        self.assertEqual(signal.redacted_content.count("[REDACTED]"), 1)
+                        self.assertEqual(signal.redacted_content, case.expected_redacted_content)
 
         asyncio.run(exercise())
 

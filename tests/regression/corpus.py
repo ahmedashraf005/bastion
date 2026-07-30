@@ -16,7 +16,9 @@ from policy.engine import PolicyEngine
 
 
 CORPUS_ROOT = Path(__file__).resolve().parents[1] / "corpus"
-BENIGN_BANDS = frozenset({"ordinary", "adjacent_vocabulary", "structurally_awkward"})
+BENIGN_BANDS = frozenset(
+    {"ordinary", "adjacent_vocabulary", "structurally_awkward", "redaction_span"}
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class CorpusCase:
     payload_codepoints: str | None
     provenance: dict[str, object]
     override_justification: str | None
+    expected_redacted_content: str | None
 
 
 def _declared_codepoints(value: str | None) -> list[str]:
@@ -73,6 +76,14 @@ def load_corpus(path: Path) -> list[CorpusCase]:
         justification = override.get("justification") if isinstance(override, dict) else None
         if override is not None and (band != "structurally_awkward" or not isinstance(justification, str) or not justification.strip()):
             raise ValueError(f"{path}: {case_id}: invalid false-positive override")
+        expected_redacted_content = raw_case.get("expected_redacted_content")
+        if expected_redacted_content is not None and not isinstance(expected_redacted_content, str):
+            raise ValueError(f"{path}: {case_id}: expected_redacted_content must be a string")
+        if path.name == "benign.yaml" and band == "redaction_span":
+            if raw_case.get("expect") == "redact" and expected_redacted_content is None:
+                raise ValueError(f"{path}: {case_id}: redact span case requires expected_redacted_content")
+            if raw_case.get("expect") == "allow" and expected_redacted_content is not None:
+                raise ValueError(f"{path}: {case_id}: allow span case must not define expected_redacted_content")
         cases.append(
             CorpusCase(
                 id=case_id,
@@ -82,6 +93,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
                 payload_codepoints=raw_case.get("payload_codepoints"),
                 provenance=provenance,
                 override_justification=justification,
+                expected_redacted_content=expected_redacted_content,
             )
         )
         seen_ids.add(case_id)

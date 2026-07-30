@@ -3,6 +3,7 @@ band_manifest:
   ordinary: 20
   adjacent_vocabulary: 10
   structurally_awkward: 12
+  redaction_span: 6
 cases:
   - id: ordinary-balance-001
     band: ordinary
@@ -236,3 +237,60 @@ cases:
       Which statement format should I download?
     payload_codepoints: "U+20AC U+00EB U+00F4"
     provenance: { author: Codex, authored: 2026-07-29, source: manually authored SampleBank Copilot traffic }
+
+  - id: span-long-uppercase-digits-001
+    band: redaction_span
+    expect: allow
+    payload: |-
+      SETTLEMENT REPORT 2026-07-30 / BATCH 482901 / REGION UAE
+      TXN-9F4A77C2 STATUS SETTLED AMOUNT AED 1250.00 REFERENCE 8XQ4M92K
+      CUSTOMER ACCOUNT SB1001 REVIEW WINDOW JULY2026 CHANNEL MOBILE
+      TXN-72M4QX90 STATUS SETTLED AMOUNT AED 980.00 REFERENCE 4K2M99XQ
+      CUSTOMER ACCOUNT SB1002 REVIEW WINDOW JULY2026 CHANNEL BRANCH
+      TXN-5A9C2R7Y STATUS SETTLED AMOUNT AED 430.00 REFERENCE 9QX4K2M7
+      CUSTOMER ACCOUNT SB1003 REVIEW WINDOW JULY2026 CHANNEL WEB
+      TXN-1N8T4O2I STATUS SETTLED AMOUNT AED 75.00 REFERENCE 7M2QX49K
+      CUSTOMER ACCOUNT SB1004 REVIEW WINDOW JULY2026 CHANNEL ATM
+      TXN-3R2Y9A4C STATUS SETTLED AMOUNT AED 640.00 REFERENCE 2K4M9XQ7
+      CUSTOMER ACCOUNT SB1005 REVIEW WINDOW JULY2026 CHANNEL MOBILE
+      TXN-6Q7X2M49 STATUS SETTLED AMOUNT AED 120.00 REFERENCE 4M9K2QX7
+    provenance: { author: Codex, authored: 2026-07-30, source: redaction span regression corpus }
+
+  - id: span-legitimate-identifiers-001
+    band: redaction_span
+    expect: allow
+    payload: >-
+      Your IBAN GB82 WEST 1234 5698 7654 32 is verified. Transaction reference
+      TXN-9F4A77C2, card ending 4821, support ticket SBK-2026-07130, and SWIFT/BIC
+      BOFAUS3N are legitimate account-service identifiers.
+    provenance: { author: Codex, authored: 2026-07-30, source: redaction span regression corpus }
+
+  - id: span-scattered-marker-alphabet-001
+    band: redaction_span
+    expect: allow
+    payload: >-
+      Balance B; account A; statement S; transfer T; interest I; overdraft O;
+      notification N; card C; alert A; network N; account A; reward R; yearly Y;
+      seven 7; kiosk K; two 2; mortgage M; nine 9; queue Q; exchange X; four 4.
+    provenance: { author: Codex, authored: 2026-07-30, source: redaction span regression corpus }
+
+  - id: span-partial-marker-prefix-001
+    band: redaction_span
+    expect: allow
+    payload: >-
+      The internal training example prefix BASTION-CANARY- is incomplete here;
+      the customer-facing reference is NOT-A-SECRET and must remain visible.
+    provenance: { author: Codex, authored: 2026-07-30, source: redaction span regression corpus }
+
+  - id: span-exact-marker-bounded-001
+    band: redaction_span
+    expect: redact
+    payload: "Case review: BASTION-CANARY-7K2M9QX4. Keep the surrounding transaction reference TXN-9F4A77C2 visible."
+    expected_redacted_content: "Case review: [REDACTED]. Keep the surrounding transaction reference TXN-9F4A77C2 visible."
+    provenance: { author: Codex, authored: 2026-07-30, source: redaction span regression corpus }
+
+  - id: span-marker-wide-interleaver-001
+    band: redaction_span
+    expect: allow
+    payload: "B~~~~~~~~~~A~~~~~~~~~~S~~~~~~~~~~T~~~~~~~~~~I~~~~~~~~~~O~~~~~~~~~~N~~~~~~~~~~-~~~~~~~~~~C~~~~~~~~~~A~~~~~~~~~~N~~~~~~~~~~A~~~~~~~~~~R~~~~~~~~~~Y~~~~~~~~~~-~~~~~~~~~~7~~~~~~~~~~K~~~~~~~~~~2~~~~~~~~~~M~~~~~~~~~~9~~~~~~~~~~Q~~~~~~~~~~X~~~~~~~~~~4"
+    provenance: { author: Codex, authored: 2026-07-30, source: bounded-window value-anchor regression corpus }
