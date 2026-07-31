@@ -10,7 +10,16 @@ from pathlib import Path
 from typing import Annotated, Literal, Union
 
 import httpx
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    TypeAdapter,
+    ValidationError,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from gate.detectors.system_prompt_leak import SystemPromptLeakDetector
 
@@ -21,17 +30,38 @@ UNICODE_CATEGORIES = frozenset({"Cf", "Cc", "Zs", "Zl", "Zp"})
 NAMED_NORMALIZATION_CLASSES = frozenset({"unicode_whitespace", "ascii_separators"})
 REGEX_METACHARACTERS = frozenset("\\.^$*+?{}[]|()")
 BENIGN_CORPUS_PATH = Path(__file__).resolve().parents[2] / "tests/corpus/benign.yaml"
+DETECTOR_STAGES: dict[str, Literal["input", "output", "both"]] = {
+    "system_prompt_leak": "output",
+}
+
+
+def detector_stage(detector: str) -> Literal["input", "output", "both"]:
+    """Return the authoritative execution stage for a supported detector."""
+
+    return DETECTOR_STAGES[detector]
 
 
 class BlastRadiusReport(BaseModel):
     """Required LLM-authored review surface; it never executes policy logic."""
 
-    affected_stage: Literal["input", "output", "both"]
     affected_classes: list[str] = Field(min_length=1)
     expected_false_positive_risk: Literal["low", "medium", "high"]
     rationale: str = Field(min_length=1)
     benign_corpus_required: bool
     existing_normalization_overlap: list[str] = Field(default_factory=list)
+    _affected_stage: Literal["input", "output", "both"] = PrivateAttr(default="output")
+
+    @computed_field
+    @property
+    def affected_stage(self) -> Literal["input", "output", "both"]:
+        """Expose the detector-derived stage without asking the model to infer it."""
+
+        return self._affected_stage
+
+    def derive_affected_stage(self, detector: str) -> None:
+        """Attach immutable detector-owned stage metadata after proposal decoding."""
+
+        self._affected_stage = detector_stage(detector)
 
     @model_validator(mode="after")
     def reject_input_only_classes_for_output_stage(self) -> "BlastRadiusReport":
@@ -106,7 +136,10 @@ class NormalizationProposal(BaseModel):
 
     @model_validator(mode="after")
     def require_output_stage_for_output_detector(self) -> "NormalizationProposal":
-        if self.blast_radius.affected_stage == "input":
+        expected_stage = detector_stage(self.detector)
+        self.blast_radius.derive_affected_stage(self.detector)
+        assert self.blast_radius.affected_stage == expected_stage
+        if expected_stage == "input":
             raise ValueError("system_prompt_leak_requires_output_or_both_stage")
         return self
 
@@ -122,7 +155,10 @@ class DetectorConfigProposal(BaseModel):
 
     @model_validator(mode="after")
     def require_output_stage_for_output_detector(self) -> "DetectorConfigProposal":
-        if self.blast_radius.affected_stage == "input":
+        expected_stage = detector_stage(self.detector)
+        self.blast_radius.derive_affected_stage(self.detector)
+        assert self.blast_radius.affected_stage == expected_stage
+        if expected_stage == "input":
             raise ValueError("system_prompt_leak_requires_output_or_both_stage")
         return self
 

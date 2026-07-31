@@ -312,3 +312,27 @@ class RuleSynthesizerSecretGuardTests(unittest.TestCase):
                     },
                 }
             )
+
+    def test_output_detector_stage_is_derived_not_model_generated(self) -> None:
+        proposal = PROPOSAL_ADAPTER.validate_python(
+            {
+                "proposal_type": "normalization",
+                "proposal_schema_version": 1,
+                "detector": "system_prompt_leak",
+                "normalization": {"operation": "add", "unicode_categories": ["Cf"]},
+                "description": "stage comes from the detector",
+                "blast_radius": {
+                    # An unexpected model field is ignored; the detector supplies output.
+                    "affected_stage": "input",
+                    "affected_classes": ["format characters"],
+                    "expected_false_positive_risk": "high",
+                    "rationale": "test",
+                    "benign_corpus_required": True,
+                },
+            }
+        )
+        self.assertEqual(proposal.blast_radius.affected_stage, "output")
+        self.assertEqual(proposal.model_dump()["blast_radius"]["affected_stage"], "output")
+
+        schema = PROPOSAL_ADAPTER.json_schema()
+        self.assertNotIn("affected_stage", str(schema))
