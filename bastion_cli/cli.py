@@ -53,14 +53,14 @@ def compose(root: Path, *args: str, check: bool = True) -> int:
 
 def compose_ready(root: Path) -> None:
     require_docker()
-    compose(root, "up", "-d", "--wait")
+    compose(root, "up", "-d", "--build", "--wait")
 
 
 def command_gate(args: argparse.Namespace) -> int:
     root = project_root()
     require_docker()
     if args.action == "up":
-        compose(root, "up", "-d", "--wait")
+        compose(root, "up", "-d", "--build", "--wait")
     elif args.action == "down":
         compose(root, "down")
     else:
