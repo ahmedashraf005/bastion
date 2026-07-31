@@ -80,6 +80,10 @@ def command_strike_run(args: argparse.Namespace) -> int:
         )
 
     compose_ready(root)
+    # Strike is behind the manual profile, so it is not rebuilt by the
+    # default-stack `up --build`. Build it explicitly before the on-demand
+    # run; otherwise a stale local image can carry an older migration head.
+    compose(root, "--profile", "manual", "build", "strike")
     compose_args = [
         "--profile",
         "manual",
