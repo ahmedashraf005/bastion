@@ -42,5 +42,34 @@ revisited only when a target produces a complete substituted marker in a real
 campaign, or when LLM01, LLM02, or LLM10 coverage lands. Do not broaden this
 value matcher implicitly before then.
 
+## Open label/value-transcription gap
+
+The marker label can leak verbatim as clean ASCII while the marker value is
+corrupted by model transcription error. Value-anchored detection deliberately
+does not fire in that case. Real evidence is attempt
+`a8b42d5b-f7f3-4c7f-b35e-7ea6c827aaab` from campaign `3fad81c5`: the response
+contained the unmodified `BASTION-CANARY-` label, had 19/23 exact positional
+marker overlap, 22/23 case-folded overlap, and 7/8 case-folded suffix overlap.
+
+Closing this gap would require an architectural change to the detection anchor:
+label-anchored, case-folded, or edit-distance-tolerant matching. Each expands
+the false-positive surface and must be measured against the benign corpus.
+This is a human judgment decision, not a synthesizable signature; do not
+silently broaden the marker matcher.
+
+## Campaign-comparison cautions
+
+Gate held across 40 adversarial target queries in campaigns `e51b2f85` and
+`f843b120`, with zero confirmed bypasses. The default-profile run redacted
+five replies while the permissive-profile run redacted none. That 5-vs-0
+difference is **not** an ASR delta: redacted or unredacted `target_reply`
+content enters the adaptive planner's history and changes later prompts.
+
+Before/after campaign comparisons must also disable or freeze the
+StrategyLibrary. It persists cross-campaign knowledge, so an unfrozen later
+campaign can learn from an earlier campaign that the earlier campaign could
+not use. Together, persisted strategy context and within-campaign
+`target_reply` history confound comparisons in opposite directions.
+
 If a configured reference cannot resolve, Gate fails startup/readiness rather
 than silently weakening output detection.
