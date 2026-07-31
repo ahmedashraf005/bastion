@@ -20,10 +20,10 @@ Containerization does not create a background campaign worker, queue consumer,
 or any new job-control behavior.
 
 Gate's image installs dependencies and the small ungated spaCy model only.
-Prompt Guard 2 weights are downloaded at container startup, before Uvicorn,
-into a runtime cache volume using `HF_TOKEN` supplied from `.env`. The image
-never contains those gated weights. A missing or empty token fails the
-container immediately with a clear error.
+Prompt Guard 2 weights are downloaded at startup when `HF_TOKEN` is supplied,
+into a runtime cache volume. The image never contains those gated weights. If
+the token is absent, Gate remains ready with direct Prompt Guard protection
+explicitly disabled; LLM02 and LLM07 remain active.
 
 The one-shot `ollama-model-init` service verifies that `llama3.1:8b` and
 `nomic-embed-text` exist on the selected Ollama instance and performs a

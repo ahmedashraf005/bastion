@@ -33,6 +33,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bastion.gate")
 
+
+def load_prompt_guard(hf_token: str | None) -> PromptGuardDetector | None:
+    """Load optional LLM01 direct-injection protection without blocking readiness."""
+
+    if not hf_token:
+        logger.warning(
+            "LLM01 Prompt Guard 2 direct-prompt-injection detector is INACTIVE: "
+            "HF_TOKEN is unset; set HF_TOKEN in .env and restart Gate to enable it"
+        )
+        return None
+    return PromptGuardDetector.load()
+
 POLICY_PROFILE = resolve_policy_profile(settings.policy_profile, settings.rules_path)
 RULES_PATH = POLICY_PROFILE.rules
 LEAK_PATTERNS_PATH = POLICY_PROFILE.leak_patterns
@@ -241,12 +253,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         app.state.presidio_analyzer = app.state.presidio_pii_detector.analyzer
         app.state.presidio_anonymizer = app.state.presidio_pii_detector.anonymizer
-        if not settings.hf_token:
-            raise RuntimeError(
-                "HF_TOKEN is required to download the gated Prompt Guard 2 model; "
-                "set it in .env"
-            )
-        app.state.prompt_guard_detector = PromptGuardDetector.load()
+        app.state.prompt_guard_detector = load_prompt_guard(settings.hf_token)
         yield
     finally:
         await app.state.database_engine.dispose()
@@ -662,8 +669,12 @@ async def chat_completions(request: Request) -> Response:
         and message.get("role") == "user"
         and isinstance(message.get("content"), str)
     )
-    prompt_guard_detector: PromptGuardDetector = request.app.state.prompt_guard_detector
-    detector_signal = await prompt_guard_detector.scan(user_content)
+    prompt_guard_detector: PromptGuardDetector | None = request.app.state.prompt_guard_detector
+    detector_signal = (
+        await prompt_guard_detector.scan(user_content)
+        if prompt_guard_detector is not None
+        else DetectorSignal(detector="prompt_guard_2", injection_score=None)
+    )
     detector_signals = [
         detector_signal.model_dump(mode="json"),
         pii_signal.model_dump(mode="json"),

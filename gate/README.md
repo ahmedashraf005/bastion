@@ -36,7 +36,8 @@ table. A database write failure is logged but does not prevent the proxy from
 returning its already-prepared response. Gate runs Prompt Guard 2 for direct
 LLM01 input injection when `HF_TOKEN` is available, Presidio for LLM02 input
 PII, and the value-anchored system-prompt leak detector for LLM07 output.
-At this revision, the Gate entrypoint requires `HF_TOKEN` to download Prompt
-Guard before readiness; the fresh-clone startup change is tracked separately.
+Without `HF_TOKEN`, Prompt Guard is disabled with an explicit startup warning;
+Gate remains ready and LLM02/LLM07 stay active. Set `HF_TOKEN` in `.env` and
+restart Gate to enable Prompt Guard.
 Indirect tool-output injection, tool-argument scanning, multi-choice output
 scanning, and LLM10 are outside current coverage; see `docs/threat-model.md`.
