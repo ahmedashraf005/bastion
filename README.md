@@ -61,7 +61,8 @@ not additional runtime dependencies.
 ## Quickstart
 
 The supported path is Docker Compose plus host-native Ollama. Install Ollama
-on the host and pull the two required local models first:
+on the host, configure its service to listen on `0.0.0.0:11434` so Docker can
+reach it, and pull the two required local models first:
 
 ```bash
 ollama pull llama3.1:8b
