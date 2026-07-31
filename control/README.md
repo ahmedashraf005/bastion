@@ -14,5 +14,6 @@ Run every .NET command in this directory through the project-local wrapper:
 
 Do **not** use bare `dotnet` here. On this machine it resolves to a
 pre-existing .NET 8 installation unrelated to this project. `./dotnet10`
-uses the installed .NET 10 host, while `global.json` records the required
-SDK version for contributors and CI.
+resolves `dotnet` from `PATH` (or `BASTION_DOTNET_BIN` when set) and fails
+with an actionable message if no SDK is available; `global.json` records the
+required SDK version for contributors and CI.
