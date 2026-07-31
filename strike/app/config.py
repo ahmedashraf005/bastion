@@ -46,6 +46,13 @@ class Settings:
     valkey_url: str = os.getenv("VALKEY_URL", "redis://localhost:6380/0")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
     runner_lease_seconds: int = int(os.getenv("STRIKE_RUNNER_LEASE_SECONDS", "180"))
+    planner_provider: str = os.getenv("STRIKE_PLANNER_PROVIDER", "ollama")
+    planner_model: str = os.getenv("STRIKE_PLANNER_MODEL", "llama3.1:8b")
+    openai_model: str = os.getenv("STRIKE_OPENAI_MODEL", "gpt-4o-mini")
+    openai_base_url: str = os.getenv(
+        "STRIKE_OPENAI_BASE_URL", "https://api.openai.com/v1"
+    ).rstrip("/")
+    openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
 
 
 settings = Settings()

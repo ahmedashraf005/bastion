@@ -57,3 +57,31 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
 
 The repository currently contains 14 ADR documents; they describe decisions,
 not additional runtime dependencies.
+
+## Quickstart
+
+The supported path is Docker Compose plus host-native Ollama. Install Ollama
+on the host and pull the two required local models first:
+
+```bash
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+cp .env.example .env
+python3 -m pip install -e .
+bastion gate up
+```
+
+`bastion gate up` waits for Postgres, Gate, SampleBank, Control, the dashboard,
+and the model warmup service. `HF_TOKEN` is optional: without it, Gate prints
+an explicit warning and runs with LLM02 and LLM07 while Prompt Guard LLM01 is
+inactive. To run a reviewed campaign after the stack is healthy:
+
+```bash
+bastion strike run --config strike/attempts/canary_leak.yaml
+```
+
+The default planner is local Ollama. `--planner openai` is an explicit opt-in
+that requires the caller's `OPENAI_API_KEY` and incurs that provider's cost;
+there is no silent fallback. For the containerized Linux inference path, stop
+host Ollama and use both `COMPOSE_OLLAMA_BASE_URL=http://ollama:11434` and
+`docker compose --profile local-inference up`.

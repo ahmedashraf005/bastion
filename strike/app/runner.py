@@ -130,7 +130,11 @@ class CampaignOutcome:
     elapsed_seconds: float
 
 
-PLANNER_MODEL = "llama3.1:8b"
+PLANNER_MODEL = (
+    settings.openai_model
+    if settings.planner_provider == "openai"
+    else settings.planner_model
+)
 DEFAULT_MAX_QUERIES = 50
 DEFAULT_MAX_WALL_CLOCK_SECONDS = 300
 # Measured from campaign 3fad81c5: 194.846 seconds for ten target queries.
@@ -156,8 +160,16 @@ def inference_provenance(planner_timeout_seconds: float) -> dict[str, object]:
     """Record the configured inference context needed for timing comparisons."""
 
     return {
-        "inference_base_url": settings.ollama_base_url,
-        "inference_route": inference_route(settings.ollama_base_url),
+        "inference_base_url": (
+            settings.openai_base_url
+            if settings.planner_provider == "openai"
+            else settings.ollama_base_url
+        ),
+        "inference_route": (
+            "openai_compatible"
+            if settings.planner_provider == "openai"
+            else inference_route(settings.ollama_base_url)
+        ),
         "inference_model": PLANNER_MODEL,
         "inference_parameters": {
             "planner_request_timeout_seconds": planner_timeout_seconds,
@@ -166,6 +178,7 @@ def inference_provenance(planner_timeout_seconds: float) -> dict[str, object]:
             "prune_gate_max_parse_retries": 3,
             "synthesizer_request_timeout_seconds": settings.request_timeout_seconds,
             "synthesizer_max_parse_retries": 3,
+            "planner_provider": settings.planner_provider,
         },
     }
 
@@ -311,6 +324,9 @@ def create_attempt_source(
         ollama_base_url=settings.ollama_base_url,
         model=PLANNER_MODEL,
         request_timeout_seconds=planner_request_timeout_seconds,
+        provider=settings.planner_provider,
+        openai_base_url=settings.openai_base_url,
+        openai_api_key=settings.openai_api_key,
     )
     if attempts_file.attempt_source == "planner":
         return PlannerAttemptSource(planner, attempts_file.objective)
@@ -323,6 +339,9 @@ def create_attempt_source(
             ollama_base_url=settings.ollama_base_url,
             model=PLANNER_MODEL,
             request_timeout_seconds=planner_request_timeout_seconds,
+            provider=settings.planner_provider,
+            openai_base_url=settings.openai_base_url,
+            openai_api_key=settings.openai_api_key,
         ),
         objective=attempts_file.objective,
         branching_factor=attempts_file.branching_factor or 0,
@@ -486,6 +505,11 @@ async def run_campaign(
             + ", ".join(ALLOWED_TARGETS)
         )
 
+    if settings.planner_provider == "openai" and not settings.openai_api_key:
+        raise ValueError(
+            "STRIKE_PLANNER_PROVIDER=openai requires OPENAI_API_KEY; "
+            "there is no silent Ollama fallback"
+        )
     attempts_file = load_attempts(attempts_path)
     max_queries = (
         max_queries

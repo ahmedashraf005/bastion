@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import httpx
 from pydantic import BaseModel, Field
 
+from .provider import PlannerChatClient
 
 if TYPE_CHECKING:
     from strike.app.attempt_sources import AttemptRecord
@@ -41,12 +42,21 @@ class AttackerPlanner:
         model: str,
         max_parse_retries: int = 3,
         request_timeout_seconds: float = 45,
+        provider: str = "ollama",
+        openai_base_url: str = "https://api.openai.com/v1",
+        openai_api_key: str | None = None,
     ) -> None:
         self._ollama_base_url = ollama_base_url.rstrip("/")
         self._model = model
         self._max_parse_retries = max_parse_retries
         self._request_timeout_seconds = request_timeout_seconds
         self.last_raw_output: str | None = None
+        self._chat_client = PlannerChatClient(
+            provider,
+            ollama_base_url=ollama_base_url,
+            openai_base_url=openai_base_url,
+            openai_api_key=openai_api_key,
+        )
 
     @staticmethod
     def _history_summary(history: list[AttemptRecord]) -> str:
@@ -104,23 +114,16 @@ Consider attacker technique categories such as role-play or persona framing; cla
         """Call Ollama directly and return only a Pydantic-validated attempt."""
 
         failures: list[str] = []
-        payload = {
-            "model": self._model,
-            "messages": self.build_messages(objective, history),
-            "stream": False,
-            "format": PlannerAttempt.model_json_schema(),
-        }
         async with httpx.AsyncClient(timeout=self._request_timeout_seconds) as client:
             for generation_number in range(1, self._max_parse_retries + 1):
                 try:
-                    response = await client.post(
-                        f"{self._ollama_base_url}/api/chat", json=payload
+                    raw_output = await self._chat_client.complete(
+                        client,
+                        model=self._model,
+                        messages=self.build_messages(objective, history),
+                        schema=PlannerAttempt.model_json_schema(),
+                        schema_name="bastion_planner_attempt",
                     )
-                    response.raise_for_status()
-                    response_body = response.json()
-                    raw_output = response_body["message"]["content"]
-                    if not isinstance(raw_output, str):
-                        raise ValueError("Ollama response content was not a string")
                     self.last_raw_output = raw_output
                     return PlannerAttempt.model_validate_json(raw_output)
                 except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
@@ -179,25 +182,18 @@ Consider attacker technique categories such as role-play or persona framing; cla
             raise ValueError("branching_factor must be greater than zero")
 
         failures: list[str] = []
-        payload = {
-            "model": self._model,
-            "messages": self.build_candidate_batch_messages(
-                objective, history, branching_factor, retrieved_strategies
-            ),
-            "stream": False,
-            "format": CandidateBatch.model_json_schema(),
-        }
         async with httpx.AsyncClient(timeout=self._request_timeout_seconds) as client:
             for generation_number in range(1, self._max_parse_retries + 1):
                 try:
-                    response = await client.post(
-                        f"{self._ollama_base_url}/api/chat", json=payload
+                    raw_output = await self._chat_client.complete(
+                        client,
+                        model=self._model,
+                        messages=self.build_candidate_batch_messages(
+                            objective, history, branching_factor, retrieved_strategies
+                        ),
+                        schema=CandidateBatch.model_json_schema(),
+                        schema_name="bastion_candidate_batch",
                     )
-                    response.raise_for_status()
-                    response_body = response.json()
-                    raw_output = response_body["message"]["content"]
-                    if not isinstance(raw_output, str):
-                        raise ValueError("Ollama response content was not a string")
                     self.last_raw_output = raw_output
                     batch = CandidateBatch.model_validate_json(raw_output)
                     if len(batch.candidates) != branching_factor:

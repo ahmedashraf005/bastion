@@ -2,6 +2,8 @@
 
 Bastion.Strike is the safety-limited red-team campaign runner. It can target
 only the bundled SampleBank Copilot through the reviewed hardcoded allowlist.
+The supported operator command is `bastion strike run --config <campaign.yaml>`;
+the direct module command below remains useful for development and diagnostics.
 
 Run Strike commands from the repository root with Strike's dedicated virtual
 environment; do not use `gate/.venv` for campaign or review commands.
@@ -29,4 +31,5 @@ strike/.venv/bin/python -m strike.synthesizer.review_cli list
 strike/.venv/bin/python -m strike.synthesizer.review_cli show <proposal-id>
 ```
 
-Gate and SampleBank Copilot must be running before a campaign is invoked.
+Gate and SampleBank Copilot must be running before a campaign is invoked. The
+Compose-backed quickstart starts them with `bastion gate up`.

@@ -6,6 +6,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from .attacker import PlannerAttempt, PlannerGenerationError
+from .provider import PlannerChatClient
 
 
 class CandidateEvaluation(BaseModel):
@@ -30,11 +31,20 @@ class PruneGate:
         model: str,
         max_parse_retries: int = 3,
         request_timeout_seconds: float = 45,
+        provider: str = "ollama",
+        openai_base_url: str = "https://api.openai.com/v1",
+        openai_api_key: str | None = None,
     ) -> None:
         self._ollama_base_url = ollama_base_url.rstrip("/")
         self._model = model
         self._max_parse_retries = max_parse_retries
         self._request_timeout_seconds = request_timeout_seconds
+        self._chat_client = PlannerChatClient(
+            provider,
+            ollama_base_url=ollama_base_url,
+            openai_base_url=openai_base_url,
+            openai_api_key=openai_api_key,
+        )
 
     @staticmethod
     def build_messages(
@@ -64,23 +74,16 @@ class PruneGate:
         """Return an ordered, schema-validated evaluation with bounded retries."""
 
         failures: list[str] = []
-        payload = {
-            "model": self._model,
-            "messages": self.build_messages(objective, candidates),
-            "stream": False,
-            "format": BatchEvaluation.model_json_schema(),
-        }
         async with httpx.AsyncClient(timeout=self._request_timeout_seconds) as client:
             for generation_number in range(1, self._max_parse_retries + 1):
                 try:
-                    response = await client.post(
-                        f"{self._ollama_base_url}/api/chat", json=payload
+                    raw_output = await self._chat_client.complete(
+                        client,
+                        model=self._model,
+                        messages=self.build_messages(objective, candidates),
+                        schema=BatchEvaluation.model_json_schema(),
+                        schema_name="bastion_prune_evaluation",
                     )
-                    response.raise_for_status()
-                    response_body = response.json()
-                    raw_output = response_body["message"]["content"]
-                    if not isinstance(raw_output, str):
-                        raise ValueError("Ollama response content was not a string")
                     evaluation = BatchEvaluation.model_validate_json(raw_output)
                     if len(evaluation.evaluations) != len(candidates):
                         raise ValueError(

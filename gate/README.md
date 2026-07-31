@@ -4,9 +4,9 @@ Bastion.Gate is the FastAPI data-plane service for Bastion. It is a
 transparent OpenAI-compatible passthrough to a local Ollama instance,
 supporting both JSON and SSE chat-completion responses.
 
-Start Postgres from the repository root, then from inside `gate/`, create and
-activate a virtual environment, install the dependencies, apply the Gate-owned
-migrations, and run the service:
+The supported operator path is `bastion gate up` from the repository root. For
+direct service development, create a virtual environment inside `gate/`,
+install the dependencies, apply the Gate-owned migrations, and run Uvicorn:
 
 ```bash
 docker compose up -d postgres
