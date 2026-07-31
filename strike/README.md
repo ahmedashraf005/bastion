@@ -9,7 +9,7 @@ environment; do not use `gate/.venv` for campaign or review commands.
 ```bash
 python3.14 -m venv strike/.venv
 strike/.venv/bin/pip install -r strike/requirements.txt
-cd strike && ../.venv/bin/alembic upgrade head && cd ..
+strike/.venv/bin/alembic -c strike/alembic.ini upgrade head
 ```
 
 Run a reviewed campaign with explicit safety limits:

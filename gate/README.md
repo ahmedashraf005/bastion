@@ -33,4 +33,10 @@ audit record after the stream ends.
 
 Each request is persisted best-effort in the Gate-owned `gate.requests` audit
 table. A database write failure is logged but does not prevent the proxy from
-returning its already-prepared response. Detection is not implemented yet.
+returning its already-prepared response. Gate runs Prompt Guard 2 for direct
+LLM01 input injection when `HF_TOKEN` is available, Presidio for LLM02 input
+PII, and the value-anchored system-prompt leak detector for LLM07 output.
+At this revision, the Gate entrypoint requires `HF_TOKEN` to download Prompt
+Guard before readiness; the fresh-clone startup change is tracked separately.
+Indirect tool-output injection, tool-argument scanning, multi-choice output
+scanning, and LLM10 are outside current coverage; see `docs/threat-model.md`.

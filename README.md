@@ -6,9 +6,17 @@
 > defensive rules (red team) — attack and defense against the same target, in
 > one product.
 
-**Status: early, Phase 0.** This repository currently contains the project
-structure, infrastructure stubs, and architectural scope documents. It does
-not yet contain a working gateway or red-team worker.
+**Status: working local MVP.** The repository contains a runnable FastAPI Gate
+proxy, TAP-style Strike campaigns, the deliberately vulnerable SampleBank
+target, the read-only Control API, and the dashboard. Gate covers LLM01 direct
+prompt injection when Prompt Guard is enabled, LLM02 input PII, and LLM07
+output leakage. Strike records branching campaign evidence and the Rule
+Synthesizer produces proposals for human sign-off.
+
+The remaining boundaries are recorded in [`docs/threat-model.md`](docs/threat-model.md):
+LLM10 is planned; indirect tool-output injection, tool-argument scanning, and
+multi-choice output scanning are open gaps. The feedback loop is review-gated;
+this repository does not claim a demonstrated promoted-rule loop.
 
 ## Target architecture
 
@@ -27,11 +35,10 @@ not yet contain a working gateway or red-team worker.
 Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upstream LLM
               input detection · policy decision · streaming
               output inspection · telemetry · semantic cache
-                                                            Ollama / OpenAI /
-                                                            Azure OpenAI / other
+                                                            host-native Ollama
 
-              Bastion.Strike (scheduled red-team worker)
-              graphstrike planning · garak / PyRIT adapters
+              Bastion.Strike (on-demand red-team campaign runner)
+              TAP planning · pruning · strategy retrieval
               attacks the protected SampleBank Copilot only
                                       │
                                       ▼
@@ -41,11 +48,12 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
 
 ## Repository layout
 
-- `gate/` — FastAPI interceptor proxy, planned for Phase 1.
-- `control/` — .NET control plane, planned for a later phase.
-- `strike/` — red-team worker, planned for a later phase.
-- `sample-target/` — deliberately vulnerable SampleBank Copilot, planned for
-  a later phase.
-- `dashboard/` — React/Vite dashboard, planned for a later phase.
-- `docs/` — threat model, architectural decisions, and future finding
-  writeups.
+- `gate/` — FastAPI OpenAI-compatible interceptor proxy and detectors.
+- `control/` — read-only .NET control-plane API.
+- `strike/` — on-demand red-team campaigns and human review CLIs.
+- `sample-target/` — deliberately vulnerable SampleBank Copilot.
+- `dashboard/` — read-only React/Vite campaign and traffic dashboard.
+- `docs/` — threat model, architectural decisions, and finding writeups.
+
+The repository currently contains 14 ADR documents; they describe decisions,
+not additional runtime dependencies.

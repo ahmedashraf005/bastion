@@ -5,11 +5,11 @@
 
 ## Context
 
-Bastion's services currently run as separate host processes while Postgres,
-Valkey, and Ollama run through Compose. That makes a full local environment
-dependent on several manual startup commands and on host-only `localhost`
-addresses. Containerization should make the working stack reproducible without
-changing its existing safety or ownership decisions.
+Bastion's Gate, Control, SampleBank, dashboard, Postgres, and Valkey services
+run through Compose. Inference defaults to host-native Ollama because macOS
+Compose containers cannot use the host's Metal device. Containerization keeps
+the Linux/local-inference path available behind an explicit Compose profile
+without changing the safety or ownership decisions.
 
 ## Decision
 
@@ -25,12 +25,15 @@ into a runtime cache volume using `HF_TOKEN` supplied from `.env`. The image
 never contains those gated weights. A missing or empty token fails the
 container immediately with a clear error.
 
-Ollama models remain in Ollama's named volume. A one-shot
-`ollama-model-init` Compose service waits for Ollama's API health check, lists
-existing models, and pulls `llama3.1:8b` and `nomic-embed-text` only when they
-are absent. Gate and Strike retain their independent Alembic histories, while
-Control applies its own EF Core migration at startup; each is gated on the
-health of the infrastructure it needs.
+The one-shot `ollama-model-init` service verifies that `llama3.1:8b` and
+`nomic-embed-text` exist on the selected Ollama instance and performs a
+non-fatal warmup through `/api/generate` and `/api/embed`. It does not pull
+models. The default endpoint is host-native
+`http://host.docker.internal:11434`; the containerized Ollama service remains
+behind `--profile local-inference` and requires
+`COMPOSE_OLLAMA_BASE_URL=http://ollama:11434`. Gate and Strike retain their
+independent Alembic histories, while Control applies its own EF Core migration
+at startup; each is gated on the health of the infrastructure it needs.
 
 Compose supplies internal service-DNS overrides such as `postgres`, `valkey`,
 `ollama`, `gate`, and `sample-target`. Host-development defaults remain
