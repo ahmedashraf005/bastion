@@ -1,44 +1,60 @@
 # Bastion
 
-> Bastion is a self-hostable AI gateway that inspects and blocks malicious LLM
-> traffic (blue team) while an autonomous adversarial engine continuously
-> red-teams the protected app and feeds confirmed bypasses back as new
-> defensive rules (red team) — attack and defense against the same target, in
-> one product.
+Bastion is a locally-run purple-team firewall for LLM applications: a
+detection and policy gateway (Gate) paired with an autonomous red-team
+engine (Strike) that attacks the protected app and feeds confirmed bypasses
+back as proposed defensive rules for human sign-off. It never phones home —
+everything runs on your machine against local infrastructure, with no
+telemetry and no default outbound calls to anything Bastion-owned.
 
-**Status: working local MVP.** The repository contains a runnable FastAPI Gate
-proxy, TAP-style Strike campaigns, the deliberately vulnerable SampleBank
-target, the read-only Control API, and the dashboard. Gate covers LLM01 direct
-prompt injection when Prompt Guard is enabled, LLM02 input PII, and LLM07
-output leakage. Strike records branching campaign evidence and the Rule
-Synthesizer produces proposals for human sign-off.
+**Status: working local MVP.** Gate is a runnable FastAPI proxy with three
+active detectors. Strike runs TAP-style branching campaigns with real
+persisted evidence. Control is a read-only .NET API; the dashboard reads it.
+`bastion report` renders a campaign's evidence, including near-misses and
+known coverage gaps, without ever surfacing local diagnostics. No campaign
+has yet produced a confirmed bypass against the hardened default profile —
+see [Results](#results) — so the promoted-rule loop is implemented and
+tested but not yet demonstrated end to end against live campaign evidence.
 
-The remaining boundaries are recorded in [`docs/threat-model.md`](docs/threat-model.md):
-LLM10 is planned; indirect tool-output injection, tool-argument scanning, and
-multi-choice output scanning are open gaps. The feedback loop is review-gated;
-this repository does not claim a demonstrated promoted-rule loop.
+## Coverage
 
-## Target architecture
+- **LLM01 (direct prompt injection)** — Meta's Prompt Guard 2, input stage.
+  Degrades gracefully without `HF_TOKEN`: Gate logs an explicit startup
+  warning and stays up with LLM02 and LLM07 active; Prompt Guard alone is
+  inactive.
+- **LLM02 (sensitive information disclosure)** — Presidio, input-side
+  detection and redaction before the request reaches the upstream model.
+- **LLM07 (system prompt leakage)** — a value-anchored marker detector,
+  output stage, on completed non-streaming responses.
+- **LLM10 (unbounded consumption)** — planned, not implemented. Gate
+  persists model-provided usage when the upstream emits it but does not
+  account for, limit, or block on it. Not claimed as coverage anywhere in
+  this repository.
+
+Indirect prompt injection (LLM01's indirect half), tool-argument egress, and
+multi-choice output scanning are open gaps — see [Known gaps](#known-gaps).
+
+## Architecture
 
 ```text
-                         React/Vite/TypeScript Dashboard
-                    policies · live traffic · findings · loop
-                                      │ REST + WebSocket
+                    React/Vite/TypeScript Dashboard (read-only)
+                         campaigns · findings · traffic
+                                      │ REST (fetch)
                                       ▼
-              Bastion.Control (.NET Web API, control plane)
-                 policies · findings · RBAC · job control
+              Bastion.Control (.NET 10 Web API, read-only)
+                    campaigns · findings · proposed rules
                           │                         │
                       Postgres                 Valkey
-             policies/findings/audit      pub/sub · queue · vectors
+              strike/gate/control schemas   StrategyLibrary
 ──────────────────────────────────────────────────────────────────────
               Bastion.Gate (FastAPI, data plane)
 Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upstream LLM
-              input detection · policy decision · streaming
-              output inspection · telemetry · semantic cache
+              input detection (LLM01, LLM02) · policy decision
+              streaming passthrough · output inspection (LLM07)
                                                             host-native Ollama
 
               Bastion.Strike (on-demand red-team campaign runner)
-              TAP planning · pruning · strategy retrieval
+              TAP planning · PruneGate · strategy retrieval
               attacks the protected SampleBank Copilot only
                                       │
                                       ▼
@@ -46,28 +62,97 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
                               → human review → live policy
 ```
 
+Control has no authentication or RBAC — it is an internal, read-only
+observability API, not a security boundary, and must not be exposed as a
+production management interface. See `docs/threat-model.md`.
+
 ## Repository layout
 
 - `gate/` — FastAPI OpenAI-compatible interceptor proxy and detectors.
 - `control/` — read-only .NET control-plane API.
-- `strike/` — on-demand red-team campaigns and human review CLIs.
+- `strike/` — on-demand red-team campaigns, `bastion report`, and human
+  review CLIs.
 - `sample-target/` — deliberately vulnerable SampleBank Copilot.
 - `dashboard/` — read-only React/Vite campaign and traffic dashboard.
-- `docs/` — threat model, architectural decisions, and finding writeups.
+- `scripts/` — database backup/restore.
+- `docs/` — threat model, architectural decisions, design notes, and
+  benchmark writeups.
 
 The repository currently contains 14 ADR documents; they describe decisions,
 not additional runtime dependencies.
 
-## Benchmarks
+## Results
 
-[`docs/benchmarks/agentdojo.md`](docs/benchmarks/agentdojo.md) measures two
-local Ollama models against ETH Zurich's AgentDojo banking suite under the
-`important_instructions` injection attack. The headline: qwen2.5:7b is
-roughly twice as capable as llama3.1:8b on this suite (50% vs 25% benign
-utility) and meaningfully more susceptible to the injection (18.75% vs
-0.00% targeted ASR) — capability and injectability moved together. Not
-comparable to AgentDojo's published hosted-model results; see the doc for
-why, and for why Gate itself isn't in scope yet.
+**AgentDojo banking suite** (external benchmark, ETH Zurich — chosen because
+it's a target Bastion's author didn't write): llama3.1:8b lands **25.00%
+benign utility / 0.00% targeted ASR**; qwen2.5:7b lands **50.00% / 18.75%**.
+The injection-task-as-direct-user-task control (6/9 and 7/9 respectively) is
+what makes those ASR figures readable — it confirms both models can perform
+the underlying actions when asked directly, so llama3.1:8b's 0% reads as
+resistance, not incapacity. **Not comparable** to AgentDojo's published
+GPT-4o numbers — no hosted inference is used anywhere in this project. Full
+method, reproduction steps, and the 45-second-timeout finding on
+qwen2.5:7b: [`docs/benchmarks/agentdojo.md`](docs/benchmarks/agentdojo.md).
+
+**Bypass corpus**: 33 of 35 saved evasion payloads matched by Gate's live
+detector configuration; 2 individually pinned with recorded reasons — a
+window-size limitation (a k=8 zero-width-space density payload spans 199
+source characters against the detector's 160-character window) and Cyrillic/
+Greek visual-confusable substitution (needs a UTS #39 confusables map,
+separate work; NFKC normalization, which closed 4 other formerly-pinned
+cases, provably does not touch either payload).
+
+**Benign corpus**: 48 hand-authored cases across four bands — 20 ordinary,
+10 adjacent-vocabulary, 12 structurally-awkward, 6 redaction-span — currently
+zero false positives. Reported as corpus composition and count, not a rate:
+0/48 has a wide confidence interval at this sample size.
+
+**Live campaign evidence**: 45 adversarial queries across 3 campaigns
+against Gate's hardened default profile, zero confirmed bypasses, evidence
+retained (`bastion report --campaign <id>` renders any of them). This
+includes a campaign run against the NFKC-promoted marker detector
+specifically.
+
+## Known gaps
+
+Full detail: [`docs/threat-model.md`](docs/threat-model.md).
+
+- **Indirect prompt injection.** Gate's input-stage detectors scan
+  user-role content only; tool-role and assistant-role content are not
+  input-scanned. Payloads delivered through tool output or retrieved
+  context are outside current coverage.
+- **Tool-argument egress.** The output-stage leak detector does not scan
+  tool-call arguments — a canary or PII value carried there is not caught
+  the way one in message content is.
+- **Multi-choice output scanning.** With `n > 1`, only the first choice is
+  output-scanned.
+- **LLM10.** Not implemented — see [Coverage](#coverage).
+- **Promoted-rule reachability is not guaranteed by the promotion gates.**
+  A rule can pass mechanical verification, bypass regression, and the
+  benign-corpus check, and still be consulted by nothing, if the detector
+  path it targets isn't the one currently active. This happened: a
+  correctly-promoted Cf-category normalization had zero effect on live
+  detection from the day it landed (2026-07-29) until it was found and
+  deactivated (2026-08-03), because the active marker-matching path never
+  called the mechanism it extended. Now covered by a reachability test
+  requiring an individually-justified allowlist entry for any known
+  exception. Full account:
+  [`docs/design/value-anchored-marker-detection.md`](docs/design/value-anchored-marker-detection.md).
+
+## Rule promotion pipeline
+
+```
+confirmed bypass → proposed rule
+                 → mechanical verification (against the originating evidence)
+                 → bypass regression (every retained known bypass still blocks)
+                 → benign false-positive check (fixed corpus bands)
+                 → reachability check (is the active pattern actually reachable)
+                 → human sign-off
+                 → live policy
+```
+
+No rule reaches live policy without a human approving it. The technical
+gates catch correctness and blast radius; they do not replace the sign-off.
 
 ## Quickstart
 
@@ -155,7 +240,21 @@ dashboard (`http://localhost:5173` once `bastion gate up` is healthy) while
 it runs. A found bypass would trigger the Rule Synthesizer's proposal flow
 for human sign-off; that loop is real but not guaranteed on any given run
 against a hardened target, and this repository does not claim it has been
-demonstrated end to end.
+demonstrated end to end against a live campaign finding.
+
+After either campaign, render its evidence:
+
+```bash
+bastion report --campaign <campaign-id>          # text
+bastion report --campaign <campaign-id> --format json
+```
+
+The report covers campaign identity and provenance, coverage (every attempt
+including pruned ones, not just matches), confirmed findings with a
+four-way remediation split, near-misses with edit distance and positional
+overlap, and the known coverage gaps above — restated so a clean report
+reads as deliberate evidence, not silence. Local diagnostics (`error_type`,
+tracebacks) never appear in its output, in either format.
 
 The default planner is local Ollama. `--planner openai` is an explicit opt-in
 that requires the caller's `OPENAI_API_KEY` and incurs that provider's cost;
