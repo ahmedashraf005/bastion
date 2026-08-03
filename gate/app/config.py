@@ -38,6 +38,11 @@ class Settings:
         else None
     )
     policy_profile: str | None = os.getenv("GATE_POLICY_PROFILE") or None
+    # Opt-in, default off: Presidio's false-positive behavior on structured
+    # tool-output content (JSON, transaction records) is unmeasured. See
+    # docs/threat-model.md and the tool-output benign corpus before ever
+    # setting this true outside a measurement run.
+    scan_tool_output: bool = os.getenv("GATE_SCAN_TOOL_OUTPUT", "false").lower() == "true"
 
 
 settings = Settings()

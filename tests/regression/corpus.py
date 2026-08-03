@@ -19,6 +19,10 @@ CORPUS_ROOT = Path(__file__).resolve().parents[1] / "corpus"
 BENIGN_BANDS = frozenset(
     {"ordinary", "adjacent_vocabulary", "structurally_awkward", "redaction_span"}
 )
+# Corpora that carry a fixed band_manifest and get the same per-band
+# validation as benign.yaml. Band assignment for any file here must be fixed
+# at authoring time, same rule as benign.yaml itself.
+BANDED_CORPUS_FILENAMES = frozenset({"benign.yaml", "benign_tool_output.yaml"})
 
 
 @dataclass(frozen=True)
@@ -70,7 +74,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
         if not isinstance(provenance, dict) or not provenance.get("author") or not provenance.get("authored"):
             raise ValueError(f"{path}: {case_id}: provenance needs author and authored")
         band = raw_case.get("band")
-        if path.name == "benign.yaml" and band not in BENIGN_BANDS:
+        if path.name in BANDED_CORPUS_FILENAMES and band not in BENIGN_BANDS:
             raise ValueError(f"{path}: {case_id}: invalid benign band")
         override = raw_case.get("override")
         justification = override.get("justification") if isinstance(override, dict) else None
@@ -79,7 +83,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
         expected_redacted_content = raw_case.get("expected_redacted_content")
         if expected_redacted_content is not None and not isinstance(expected_redacted_content, str):
             raise ValueError(f"{path}: {case_id}: expected_redacted_content must be a string")
-        if path.name == "benign.yaml" and band == "redaction_span":
+        if path.name in BANDED_CORPUS_FILENAMES and band == "redaction_span":
             if raw_case.get("expect") == "redact" and expected_redacted_content is None:
                 raise ValueError(f"{path}: {case_id}: redact span case requires expected_redacted_content")
             if raw_case.get("expect") == "allow" and expected_redacted_content is not None:
@@ -97,7 +101,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
             )
         )
         seen_ids.add(case_id)
-    if path.name == "benign.yaml":
+    if path.name in BANDED_CORPUS_FILENAMES:
         manifest = raw.get("band_manifest")
         if not isinstance(manifest, dict) or set(manifest) != BENIGN_BANDS:
             raise ValueError(f"{path}: benign corpus requires a complete band_manifest")

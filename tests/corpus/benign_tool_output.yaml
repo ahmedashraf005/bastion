@@ -1,0 +1,230 @@
+version: 1
+band_manifest:
+  ordinary: 12
+  adjacent_vocabulary: 8
+  structurally_awkward: 8
+  redaction_span: 8
+cases:
+  # Realistic tool-role content (JSON API responses, transaction records,
+  # file contents, error strings, timestamps, IDs) with no PII/secrets.
+  # Measures Presidio's baseline false-positive rate on structured banking
+  # tool output when GATE_SCAN_TOOL_OUTPUT=true. Every payload here was run
+  # against the real PresidioPiiDetector at authoring time; band membership
+  # reflects observed behavior, not assumption.
+  - id: ord-balance-001
+    band: ordinary
+    expect: allow
+    payload: '{"account_id": "SB-1001", "balance": "4,812.55", "currency": "AED", "as_of": "2026-08-03T09:12:00Z"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-transactions-001
+    band: ordinary
+    expect: allow
+    payload: '{"account_id": "SB-1001", "transactions": [{"id": "TXN-9F4A77C2", "amount": "-120.00", "merchant": "Grocery Mart", "date": "2026-08-01"}, {"id": "TXN-72M4QX90", "amount": "-45.50", "merchant": "Coffee House", "date": "2026-07-31"}]}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-overdraft-doc-001
+    band: ordinary
+    expect: allow
+    payload: |-
+      # Overdraft Policy
+
+      Accounts may overdraft up to AED 500 before a fee applies. Fees are
+      assessed at end of business day and appear on the next statement.
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-error-001
+    band: ordinary
+    expect: allow
+    payload: "UpstreamTimeoutError: the core banking gateway did not respond within 8000ms (request_id=req_4f7b2a91)"
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-pagination-001
+    band: ordinary
+    expect: allow
+    payload: '{"page": 2, "page_size": 25, "next_cursor": "eyJvZmZzZXQiOjI1fQ", "total_results": 118}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-catalog-001
+    band: ordinary
+    expect: allow
+    payload: '{"products": [{"code": "SAVINGS-PLUS", "rate": "3.25%"}, {"code": "TERM-12M", "rate": "4.10%"}]}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-config-001
+    band: ordinary
+    expect: allow
+    payload: '{"feature_flags": {"instant_transfer": true, "biometric_login": false}, "region": "UAE"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-logs-001
+    band: ordinary
+    expect: allow
+    payload: |-
+      2026-08-03T09:00:01Z INFO request_id=req_88c1 route=/v1/accounts status=200 duration_ms=42
+      2026-08-03T09:00:03Z INFO request_id=req_88c2 route=/v1/transactions status=200 duration_ms=61
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-empty-search-001
+    band: ordinary
+    expect: allow
+    payload: '{"query": "branch near me", "results": []}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-health-001
+    band: ordinary
+    expect: allow
+    payload: '{"status": "ok", "uptime_seconds": 943201, "version": "2026.7.3"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-fx-001
+    band: ordinary
+    expect: allow
+    payload: '{"base": "USD", "quote": "AED", "rate": 3.6725, "updated_at": "2026-08-03T06:00:00Z"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: ord-atm-001
+    band: ordinary
+    expect: allow
+    payload: '{"branch": "Downtown", "address": "12 Sheikh Zayed Rd", "hours": "08:00-20:00", "atm_count": 3}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+
+  # Tool output that mentions PII-adjacent vocabulary (email, phone, SSN,
+  # credit card) as field names, policy text, or error messages, without any
+  # actual PII value present — the surface where Presidio's context-word
+  # boosting could plausibly over-fire.
+  - id: adj-security-card-digits-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: "For account security, we never ask for your full card number over chat. Use the last 4 digits only when verifying identity."
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-support-email-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: '{"support_channel": "email", "note": "Customer service replies within one business day via the email address on file."}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-ssn-flag-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: '{"ssn_verification_required": true, "reason": "new_account_opening"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-phone-flag-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: '{"phone_verification_required": false, "last_verified": "2026-06-14"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-card-field-error-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: "ERROR: credit_card field missing from request body; tokenized_card_reference must be supplied instead"
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-notif-flags-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: '{"email_notifications_enabled": true, "sms_notifications_enabled": false}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-policy-note-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: "Policy update: phone numbers collected during onboarding are stored in the identity service, not in transaction records."
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: adj-masking-rules-001
+    band: adjacent_vocabulary
+    expect: allow
+    payload: '{"masking_rules": ["us_ssn", "credit_card", "phone_number"], "applies_to": "support_transcripts"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+
+  # Structurally unusual tool output (deep nesting, escaping, tracebacks,
+  # non-JSON formats, digit runs that are the right length for CREDIT_CARD
+  # but aren't one) that stresses text extraction and pattern recognizers
+  # without containing PII.
+  - id: awk-nested-001
+    band: structurally_awkward
+    expect: allow
+    payload: '{"data": {"account": {"summary": {"balances": {"available": {"amount": "912.40", "currency": "AED"}}}}}}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-escaped-001
+    band: structurally_awkward
+    expect: allow
+    payload: '{"note": "Customer said: \"please close my account\"\nFollow-up required."}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-traceback-001
+    band: structurally_awkward
+    expect: allow
+    payload: |-
+      Traceback (most recent call last):
+        File "core_banking/client.py", line 88, in fetch_balance
+          response = self._session.get(url, timeout=self._timeout)
+        File "core_banking/client.py", line 41, in get
+          raise UpstreamTimeoutError(request_id)
+      core_banking.exceptions.UpstreamTimeoutError: request_id=req_4f7b2a91
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-unicode-minified-001
+    band: structurally_awkward
+    expect: allow
+    payload: '{"merchant":"Café Central","amount":"-18.75","note":"lunch w/ team"}'
+    payload_codepoints: "U+00E9"
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-csv-001
+    band: structurally_awkward
+    expect: allow
+    payload: |-
+      id,merchant,amount,date
+      TXN-9F4A77C2,Grocery Mart,-120.00,2026-08-01
+      TXN-72M4QX90,Coffee House,-45.50,2026-07-31
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-xml-001
+    band: structurally_awkward
+    expect: allow
+    payload: '<AccountBalanceResponse><AccountId>SB-1001</AccountId><Balance currency="AED">4812.55</Balance></AccountBalanceResponse>'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-base64-001
+    band: structurally_awkward
+    expect: allow
+    payload: '{"attachment_ref": "SGVsbG8gdGhpcyBpcyBhIHRlc3QgYXR0YWNobWVudCBibG9i"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: awk-long-digit-id-001
+    band: structurally_awkward
+    expect: allow
+    payload: '{"order_id": "9384756201938475", "status": "processed"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: 16-digit non-card ID, right length to collide with CREDIT_CARD pattern }
+
+  # Genuine PII embedded in structured tool output (must redact) and
+  # legitimate non-PII financial identifiers embedded the same way (must
+  # not redact). expect/expected_redacted_content reflect measured Presidio
+  # behavior at authoring time, not intended/desired behavior — see the
+  # redaction_span report note for span-account-routing-001, which redacts
+  # despite being non-PII.
+  - id: span-email-001
+    band: redaction_span
+    expect: redact
+    payload: '{"customer_email": "jane.doe@examplebank.com", "opt_in_marketing": true}'
+    expected_redacted_content: '{"customer_email": "[REDACTED]", "opt_in_marketing": true}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-phone-001
+    band: redaction_span
+    expect: redact
+    payload: '{"contact_phone": "+1-415-555-0148", "preferred_contact_method": "phone"}'
+    expected_redacted_content: '{"contact_phone": "[REDACTED]", "preferred_contact_method": "phone"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-card-001
+    band: redaction_span
+    expect: redact
+    payload: '{"card_on_file": "4111 1111 1111 1111", "expiry": "09/28"}'
+    expected_redacted_content: '{"card_on_file": "[REDACTED]", "expiry": "09/28"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-ssn-context-001
+    band: redaction_span
+    expect: redact
+    payload: '{"case_note": "Social Security Number on file: 078-05-1120", "status": "verification_pending"}'
+    expected_redacted_content: '{"case_note": "Social Security Number on file: [REDACTED]", "status": "verification_pending"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: fires as PHONE_NUMBER not US_SSN — see report }
+  - id: span-iban-001
+    band: redaction_span
+    expect: allow
+    payload: '{"iban": "GB29 NWBK 6016 1331 9268 19", "bank": "NatWest"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-account-routing-001
+    band: redaction_span
+    expect: allow
+    payload: '{"account_number": "SB-100234871", "routing_number": "021000021"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: measured false positive — routing_number matches PHONE_NUMBER, see report }
+  - id: span-reference-swift-001
+    band: redaction_span
+    expect: allow
+    payload: '{"reference": "TXN-9F4A77C2", "swift_bic": "BOFAUS3N"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-card-ending-001
+    band: redaction_span
+    expect: allow
+    payload: '{"card_ending": "4821", "auth_code": "00K392"}'
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }

@@ -202,8 +202,8 @@ def most_recent_user_message(body: dict[str, Any]) -> dict[str, Any] | None:
     Content shape is not restricted to plain strings here: a user message
     with OpenAI-style content-block-array content used to be silently
     skipped in favor of an earlier, string-content message (or None) — a
-    live gap in shipped behavior, regardless of any tool-output feature.
-    extract_text_content() handles the shape once a message is selected.
+    live gap, not just a tool-output concern. extract_text_content()
+    handles the shape once a message is selected.
     """
 
     messages = body.get("messages")
@@ -212,6 +212,24 @@ def most_recent_user_message(body: dict[str, Any]) -> dict[str, Any] | None:
 
     for message in reversed(messages):
         if isinstance(message, dict) and message.get("role") == "user":
+            return message
+    return None
+
+
+def most_recent_tool_message(body: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the latest tool-role message, mirroring the user-message selection.
+
+    Only the latest tool message is scanned per turn: earlier ones were
+    already scanned in full when they first arrived as the latest message on
+    a prior turn, and an agent loop resends the full history on every turn.
+    """
+
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "tool":
             return message
     return None
 
@@ -689,13 +707,32 @@ async def chat_completions(request: Request) -> Response:
     stream_requested = body.get("stream") is True
     started_at = perf_counter()
 
+    pii_detector: PresidioPiiDetector = request.app.state.presidio_pii_detector
+
     latest_user_message = most_recent_user_message(body)
     if latest_user_message is None:
-        pii_signal = DetectorSignal(detector="presidio_pii")
+        user_pii_signal = DetectorSignal(detector="presidio_pii", source_role="user")
     else:
-        pii_detector: PresidioPiiDetector = request.app.state.presidio_pii_detector
         user_text = extract_text_content(latest_user_message.get("content"))
-        pii_signal = await pii_detector.scan(user_text)
+        user_pii_signal = (await pii_detector.scan(user_text)).model_copy(
+            update={"source_role": "user"}
+        )
+
+    # Tool-output scanning is opt-in and default off (settings.scan_tool_output):
+    # false-positive behavior of Presidio over structured tool content (JSON,
+    # transaction records) is unmeasured. When off, this behaves exactly as
+    # before this feature existed — no tool message is looked up or scanned.
+    latest_tool_message = None
+    tool_pii_signal = None
+    if settings.scan_tool_output:
+        latest_tool_message = most_recent_tool_message(body)
+        if latest_tool_message is None:
+            tool_pii_signal = DetectorSignal(detector="presidio_pii", source_role="tool")
+        else:
+            tool_text = extract_text_content(latest_tool_message.get("content"))
+            tool_pii_signal = (await pii_detector.scan(tool_text)).model_copy(
+                update={"source_role": "tool"}
+            )
 
     user_content = "\n".join(
         message["content"]
@@ -709,15 +746,14 @@ async def chat_completions(request: Request) -> Response:
         await prompt_guard_detector.scan(user_content)
         if prompt_guard_detector is not None
         else DetectorSignal(detector="prompt_guard_2", injection_score=None)
-    )
-    detector_signals = [
-        detector_signal.model_dump(mode="json"),
-        pii_signal.model_dump(mode="json"),
-    ]
+    ).model_copy(update={"source_role": "user"})
+
+    input_signals = [detector_signal, user_pii_signal]
+    if tool_pii_signal is not None:
+        input_signals.append(tool_pii_signal)
+    detector_signals = [signal.model_dump(mode="json") for signal in input_signals]
     policy_engine: PolicyEngine = request.app.state.policy_engine
-    policy_result = policy_engine.evaluate(
-        [detector_signal, pii_signal], stage="input"
-    )
+    policy_result = policy_engine.evaluate(input_signals, stage="input")
     matched_rules = policy_result.matched_rules or None
 
     if policy_result.action == "block":
@@ -752,18 +788,20 @@ async def chat_completions(request: Request) -> Response:
         )
         return response
 
-    pii_redaction_match = next(
-        (
-            match
-            for match in policy_result.matches
-            if match.action == "redact"
-            and match.signal.detector == "presidio_pii"
-            and match.signal.redacted_content is not None
-        ),
-        None,
-    )
-    if pii_redaction_match is not None and latest_user_message is not None:
-        latest_user_message["content"] = pii_redaction_match.signal.redacted_content
+    # More than one presidio_pii signal can now match the same rule (user and
+    # tool), so every match is applied — each to the message it came from,
+    # never both to the same one — instead of taking only the first match.
+    for match in policy_result.matches:
+        if (
+            match.action != "redact"
+            or match.signal.detector != "presidio_pii"
+            or match.signal.redacted_content is None
+        ):
+            continue
+        if match.signal.source_role == "user" and latest_user_message is not None:
+            latest_user_message["content"] = match.signal.redacted_content
+        elif match.signal.source_role == "tool" and latest_tool_message is not None:
+            latest_tool_message["content"] = match.signal.redacted_content
 
     if stream_requested:
         client = httpx.AsyncClient(
