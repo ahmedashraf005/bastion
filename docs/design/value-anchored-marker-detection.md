@@ -57,6 +57,62 @@ the false-positive surface and must be measured against the benign corpus.
 This is a human judgment decision, not a synthesizable signature; do not
 silently broaden the marker matcher.
 
+## Promoted-rule reachability is not guaranteed by the promotion gates
+
+`system_prompt_leak` has two independent content-matching mechanisms, and
+only one of them is consulted by whichever pattern is currently active:
+
+- `literal`/`regex` patterns with `normalize: strip_separators` route
+  through `_strip_separators_with_index_map`, which consults every active
+  `PromotedNormalization`'s `unicode_categories`, `named_classes`, and
+  `codepoints`.
+- `marker_ref` patterns (the currently active
+  `sample-bank-configuration-marker`) route through `_marker_ref_spans`,
+  which never calls `_strip_separators_with_index_map` at all. Its own
+  bounded-skip scan already treats any non-marker-alphabet character as
+  skippable regardless of Unicode category, independent of any promoted
+  normalization.
+
+**Concrete instance:** `normalization-e40488d4-f3a6-427b-b1aa-62b04b0271e1`
+(the `Cf` category promoted normalization) was `active: true` and passed
+all three ADR-014 promotion gates — mechanical verification, bypass
+regression, benign-corpus check — correctly, at the time it was promoted.
+It had **zero effect on live detection** from the moment the `marker_ref`
+pattern replacement went active, because that path never calls the
+mechanism this normalization extends. This is not a bug in the rule. It is
+a gap in the promotion pipeline — **the three gates verify a rule's
+correctness, not its reachability from the currently active pattern
+version.** A rule can be correct, benign-safe, and completely inert at the
+same time, and nothing in the promotion flow currently catches that.
+
+Deactivated (not removed) 2026-08-03 when
+`normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23` (NFKC, see
+`docs/design/nfkc-marker-normalization.md`) was promoted: Gate enforces
+exactly one active entry per manifest
+(`gate/app/policy_profile.py:active_manifest_version`, backing the single
+`gate_normalization_version_id` recorded per campaign/request), so two
+simultaneously active entries is not a state Gate can start in at all, let
+alone a state where the inert one matters. Deactivating it changed nothing
+observable, since it was already contributing nothing. It remains fully
+intact in `normalization_versions.yaml` and becomes live again, unchanged,
+the moment the baseline `strip_separators` pattern is reactivated.
+
+See `tests/gate/test_marker_ref_detection.py`'s
+`test_active_normalizations_are_reachable_from_the_active_pattern` for a
+regression check against this class of gap recurring silently — it
+requires an individually-justified, non-silent allowlist entry for any
+active-but-unreachable normalization (empty as of 2026-08-03, since the
+Cf entry — its sole occupant — is no longer active), so a *new*
+unreachable entry fails loudly instead of going unnoticed the way this one
+did.
+
+`pattern_versions.yaml` does not have the same failure mode: a
+`DetectorPatternVersion`'s replacement becomes *the* effective pattern for
+its `replaces_pattern_id` — there is no second, independent mechanism it
+could fail to reach the way a `PromotedNormalization` can. An active
+pattern version whose `replaces_pattern_id` doesn't match a real baseline
+pattern fails loudly at load time (`RuntimeError`), not silently.
+
 ## Campaign-comparison cautions
 
 Gate held across 40 adversarial target queries in campaigns `e51b2f85` and

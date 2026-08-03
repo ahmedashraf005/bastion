@@ -9,8 +9,10 @@ import unittest
 from pathlib import Path
 
 import yaml
+from pydantic import TypeAdapter
 
 from detectors.system_prompt_leak import (
+    DetectorPatternVersion,
     LeakPattern,
     MarkerReferenceResolver,
     PromotedNormalization,
@@ -219,3 +221,88 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
             marker_resolver={MARKER_REF: MARKER}.__getitem__,
         )
         self.assertEqual(detector._marker_unicode_form, "NFKC")
+
+    # An active PromotedNormalization passing all three ADR-014 promotion
+    # gates does not guarantee it is consulted by the currently active
+    # pattern version — see docs/design/value-anchored-marker-detection.md,
+    # "Promoted-rule reachability is not guaranteed by the promotion gates".
+    # Individually justify every entry here; do not add one without reading
+    # that section first, and remove an entry the moment it stops being true.
+    #
+    # Empty as of 2026-08-03: normalization-e40488d4 (Cf category) was the
+    # sole occupant of this list — it was active and unreachable (see the
+    # doc section above) — but Gate enforces exactly one active entry per
+    # manifest (gate/app/policy_profile.py:active_manifest_version), so
+    # promoting normalization-b7b3cad1 (the NFKC entry, which IS reachable —
+    # the active pattern is marker_ref) required deactivating the Cf entry.
+    # It remains in normalization_versions.yaml, unchanged, not removed —
+    # simply no longer active, so it is no longer this test's concern.
+    KNOWN_UNREACHABLE_ACTIVE_NORMALIZATIONS: dict[str, str] = {}
+
+    def test_active_normalizations_are_reachable_from_the_active_pattern(self) -> None:
+        """Every ACTIVE normalization_versions.yaml entry must be reachable
+        by at least one effective pattern (after pattern_versions.yaml
+        replacements), or be an individually-justified, named exception.
+
+        This cannot assert "the promotion gates guarantee reachability" —
+        they don't, and that is the actual finding. What it can assert,
+        meaningfully: no NEW active-but-unreachable entry can land silently,
+        and the one known exception stays true (still active, still
+        actually unreachable) rather than becoming stale allowlist noise.
+        """
+
+        root = Path(".")
+        with (root / "gate/detectors/leak_patterns.yaml").open(encoding="utf-8") as f:
+            definitions = TypeAdapter(list[LeakPattern]).validate_python(yaml.safe_load(f))
+        with (root / "gate/detectors/pattern_versions.yaml").open(encoding="utf-8") as f:
+            pattern_versions = TypeAdapter(list[DetectorPatternVersion]).validate_python(
+                yaml.safe_load(f) or []
+            )
+        effective_patterns = SystemPromptLeakDetector._apply_active_pattern_versions(
+            definitions, pattern_versions
+        )
+        has_active_strip_separators_pattern = any(
+            p.pattern_type in ("literal", "regex") and p.normalize == "strip_separators"
+            for p in effective_patterns
+        )
+        has_active_marker_ref_pattern = any(
+            p.pattern_type == "marker_ref" for p in effective_patterns
+        )
+
+        with (root / "gate/detectors/normalization_versions.yaml").open(encoding="utf-8") as f:
+            normalizations = TypeAdapter(list[PromotedNormalization]).validate_python(
+                yaml.safe_load(f) or []
+            )
+
+        active_version_ids = {entry.version_id for entry in normalizations if entry.active}
+        for entry in normalizations:
+            if not entry.active:
+                continue
+            uses_strip_mechanism = bool(
+                entry.unicode_categories or entry.named_classes or entry.codepoints
+            )
+            uses_marker_mechanism = entry.marker_unicode_form is not None
+            unreachable = (uses_strip_mechanism and not has_active_strip_separators_pattern) or (
+                uses_marker_mechanism and not has_active_marker_ref_pattern
+            )
+            with self.subTest(version_id=entry.version_id):
+                if unreachable:
+                    self.assertIn(
+                        entry.version_id,
+                        self.KNOWN_UNREACHABLE_ACTIVE_NORMALIZATIONS,
+                        f"{entry.version_id} is active and unreachable by any effective "
+                        "pattern, and is not a documented, justified exception — either "
+                        "this is a new instance of the promotion-pipeline reachability "
+                        "gap (see docs/design/value-anchored-marker-detection.md) or the "
+                        "active pattern version changed and this needs investigating.",
+                    )
+
+        # The allowlist itself must stay true and current, not accumulate
+        # stale entries for normalizations that are no longer active.
+        for version_id in self.KNOWN_UNREACHABLE_ACTIVE_NORMALIZATIONS:
+            self.assertIn(
+                version_id,
+                active_version_ids,
+                f"{version_id} is allowlisted as known-unreachable but is no longer an "
+                "active normalization_versions.yaml entry — remove it from the allowlist.",
+            )
