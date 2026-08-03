@@ -197,20 +197,54 @@ def merge_matched_rules(*rule_groups: list[str]) -> list[str] | None:
 
 
 def most_recent_user_message(body: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the latest string-content user message for input-side redaction."""
+    """Return the latest user message for input-side redaction.
+
+    Content shape is not restricted to plain strings here: a user message
+    with OpenAI-style content-block-array content used to be silently
+    skipped in favor of an earlier, string-content message (or None) — a
+    live gap in shipped behavior, regardless of any tool-output feature.
+    extract_text_content() handles the shape once a message is selected.
+    """
 
     messages = body.get("messages")
     if not isinstance(messages, list):
         return None
 
     for message in reversed(messages):
-        if (
-            isinstance(message, dict)
-            and message.get("role") == "user"
-            and isinstance(message.get("content"), str)
-        ):
+        if isinstance(message, dict) and message.get("role") == "user":
             return message
     return None
+
+
+def extract_text_content(content: Any) -> str:
+    """Extract scannable text from a message's content field.
+
+    Handles the two shapes an OpenAI-compatible client can send: a plain
+    string, or a content-block array. For the array shape, only
+    ``{"type": "text", "text": "..."}`` blocks are read (the documented
+    OpenAI wire shape, confirmed directly against Ollama's
+    /v1/chat/completions endpoint) with a ``content`` key fallback (seen in
+    at least one client's own internal message representation) if ``text``
+    is absent. Non-text block types (e.g. image content) are skipped, not
+    scanned. Anything else — None, a dict, a number — returns "" rather than
+    raising, the same silent-skip behavior already used for unscannable
+    content elsewhere in this module.
+    """
+
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                continue
+            text = block.get("text")
+            if not isinstance(text, str):
+                text = block.get("content")
+            if isinstance(text, str):
+                parts.append(text)
+        return "\n".join(parts)
+    return ""
 
 
 @asynccontextmanager
@@ -660,7 +694,8 @@ async def chat_completions(request: Request) -> Response:
         pii_signal = DetectorSignal(detector="presidio_pii")
     else:
         pii_detector: PresidioPiiDetector = request.app.state.presidio_pii_detector
-        pii_signal = await pii_detector.scan(latest_user_message["content"])
+        user_text = extract_text_content(latest_user_message.get("content"))
+        pii_signal = await pii_detector.scan(user_text)
 
     user_content = "\n".join(
         message["content"]
