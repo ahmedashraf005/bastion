@@ -84,6 +84,38 @@ def resolve_project_name(root: Path) -> str:
     )
 
 
+def ensure_project_name_persisted(root: Path) -> None:
+    """Write the derived project name into .env the first time, if absent.
+
+    docker compose reads COMPOSE_PROJECT_NAME from a .env file in the
+    working directory on its own — this CLI's in-Python resolution is
+    invisible to a raw `docker compose` command run in this checkout. Without
+    this, `bastion` and a manually-run `docker compose` in the same directory
+    can resolve to different project names, and a raw command falls back to
+    the directory basename, which collides with any other checkout sharing
+    that basename (this is exactly how the live stack's containers and
+    volumes were destroyed by a raw `docker compose down` once). Only writes
+    when .env has no COMPOSE_PROJECT_NAME line yet; never overwrites an
+    operator's or an earlier run's existing value.
+    """
+
+    env_path = root / ".env"
+    if not env_path.is_file():
+        return
+    if read_dotenv_value(root, "COMPOSE_PROJECT_NAME") is not None:
+        return
+    with env_path.open("a") as f:
+        f.write(
+            "\n# Written by `bastion` on first run so a raw `docker compose`\n"
+            "# command in this directory resolves to the same project this\n"
+            "# checkout's containers and volumes already use. Changing this\n"
+            "# value orphans them — a different project name means new,\n"
+            "# empty containers and volumes, not a rename. Only change it if\n"
+            "# you understand that and want the reset.\n"
+            f"COMPOSE_PROJECT_NAME={default_project_name(root)}\n"
+        )
+
+
 def check_no_project_collision(root: Path, project_name: str) -> None:
     """Refuse to proceed if another checkout already owns this project name.
 
@@ -136,6 +168,7 @@ def compose(root: Path, *args: str, check: bool = True) -> int:
 def compose_ready(root: Path) -> None:
     require_docker()
     check_no_project_collision(root, resolve_project_name(root))
+    ensure_project_name_persisted(root)
     compose(root, "up", "-d", "--build", "--wait")
 
 
@@ -144,6 +177,7 @@ def command_gate(args: argparse.Namespace) -> int:
     require_docker()
     if args.action == "up":
         check_no_project_collision(root, resolve_project_name(root))
+        ensure_project_name_persisted(root)
         compose(root, "up", "-d", "--build", "--wait")
     elif args.action == "down":
         compose(root, "down")

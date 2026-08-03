@@ -129,7 +129,54 @@ host Ollama and use both `COMPOSE_OLLAMA_BASE_URL=http://ollama:11434` and
 path, so a second clone never recreates the first one's containers using the
 second's `.env` — that used to happen silently (including disabling the
 first checkout's `HF_TOKEN`-gated Prompt Guard) because `docker-compose.yml`
-pinned a single literal project name. If you want a stable, predictable name
-for a given checkout instead of the derived one, set `COMPOSE_PROJECT_NAME`
-in its `.env`; `bastion` refuses to proceed with a clear error if that name
-is already owned by a different checkout on the same machine.
+pinned a single literal project name. On first run, `bastion` writes that
+derived name into this checkout's `.env` so a raw `docker compose` command
+run in this directory later resolves to the same project. If you want a
+stable, predictable name for a given checkout instead of the derived one,
+set `COMPOSE_PROJECT_NAME` in its `.env` yourself before the first run;
+`bastion` refuses to proceed with a clear error if that name is already
+owned by a different checkout on the same machine.
+
+**Raw `docker compose` commands are only as safe as this.** Compose resolves
+its project name from `COMPOSE_PROJECT_NAME` in `.env` if present, and
+otherwise falls back to the *current directory's name* — not anything
+`bastion` computes. A checkout cloned into a directory literally named
+`bastion` (the default `git clone` behavior) will collide with any other
+`bastion`-named stack on the same machine if you run raw `docker compose`
+commands (`down`, `up`, `ps`, ...) before `bastion` has had a chance to
+write `COMPOSE_PROJECT_NAME` into `.env` — or if you run them from a
+different directory than the one `bastion` wrote it into. This is not
+theoretical: a raw `docker compose down -v` run this way once destroyed a
+different checkout's containers and database volumes because no persisted
+project name existed yet to tell them apart. Prefer `bastion gate up|down|status`;
+if you must use raw Compose, pass `-p <name>` explicitly every time, or
+confirm `.env` already has `COMPOSE_PROJECT_NAME` set to what you expect.
+
+### Backing up the database
+
+There is no automatic backup — the incident above is the reason this
+exists. `scripts/backup_db.sh` dumps the `strike` and `gate` schemas (the
+source-of-truth data; `control`'s schema is a read-only projection over the
+same data) to a timestamped file under `backups/` (gitignored):
+
+```bash
+./scripts/backup_db.sh
+```
+
+Run it manually before anything that could disrupt the Postgres volume —
+changing `COMPOSE_PROJECT_NAME`, experimenting with a second checkout, or
+any raw `docker compose down -v`. To restore:
+
+```bash
+./scripts/restore_db.sh backups/bastion-<timestamp>.dump
+```
+
+Pass a second argument to restore into a different database instead of the
+live one — useful for verifying a backup is good without touching real
+data:
+
+```bash
+docker compose exec postgres psql -U bastion -d bastion -c \
+  "CREATE DATABASE bastion_restore_scratch OWNER bastion;"
+./scripts/restore_db.sh backups/bastion-<timestamp>.dump bastion_restore_scratch
+```
