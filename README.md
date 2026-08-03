@@ -24,6 +24,9 @@ tested but not yet demonstrated end to end against live campaign evidence.
   inactive.
 - **LLM02 (sensitive information disclosure)** — Presidio, input-side
   detection and redaction before the request reaches the upstream model.
+  Scanning tool-role messages for the same PII/secret egress is available
+  behind `GATE_SCAN_TOOL_OUTPUT` (opt-in, default off) — see
+  [Known gaps](#known-gaps) for what it does and does not cover.
 - **LLM07 (system prompt leakage)** — a value-anchored marker detector,
   output stage, on completed non-streaming responses.
 - **LLM10 (unbounded consumption)** — planned, not implemented. Gate
@@ -117,10 +120,26 @@ specifically.
 
 Full detail: [`docs/threat-model.md`](docs/threat-model.md).
 
-- **Indirect prompt injection.** Gate's input-stage detectors scan
-  user-role content only; tool-role and assistant-role content are not
-  input-scanned. Payloads delivered through tool output or retrieved
-  context are outside current coverage.
+- **Indirect prompt injection.** Prompt Guard (LLM01) scans user-role
+  message text only; it is never run over tool-role content, and
+  assistant-role content is not input-scanned by anything. Payloads
+  delivered through tool output or retrieved context are outside current
+  LLM01 coverage — AgentDojo's `important_instructions` attack is the
+  concrete known example, and its defense cells stay cancelled.
+- **Tool-output PII scanning covers egress only, and only partially.**
+  `GATE_SCAN_TOOL_OUTPUT` (opt-in, default off) runs Presidio over the
+  latest tool-role message and redacts matches, closing part of the LLM02
+  gap above — it adds no LLM01/injection coverage. Measured against a
+  36-case, four-band benign tool-output corpus
+  (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
+  adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span), one
+  redaction-span case false-positived: a bank routing number, misread as a
+  phone number, because Presidio has no financial-identifier recognizer.
+  The same gap causes a false negative in the feature's main use case: an
+  SSN in JSON field form (`{"ssn": "078-05-1120"}`) is not detected at all —
+  the recognizer needs prose context. Full account, including a
+  JSON-validity check on the redaction itself, in
+  [`docs/threat-model.md`](docs/threat-model.md).
 - **Tool-argument egress.** The output-stage leak detector does not scan
   tool-call arguments — a canary or PII value carried there is not caught
   the way one in message content is.

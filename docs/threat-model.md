@@ -47,14 +47,57 @@ is not yet protected from a leak.
 
 ### Indirect prompt-injection boundary
 
-Gate's input-stage detectors inspect user-role content only: the latest user
-message for Presidio and user-role message text for Prompt Guard. Tool-role and
-assistant-role content are not input-scanned. Consequently, indirect prompt
-injection delivered through tool output or retrieved context is outside current
-Gate coverage. AgentDojo's `important_instructions` attack is the concrete
-known example: its payload is inserted into tool output, where Gate's current
-input-stage detection cannot observe it. This is a known gap, not a claim that
-the existing LLM01 policy protects indirect injection.
+Gate's input-stage Prompt Guard detector inspects user-role message text
+only; it is never run over tool-role content, and assistant-role content is
+not input-scanned by any detector. Consequently, indirect prompt injection
+delivered through tool output or retrieved context is outside current Gate
+coverage, regardless of the tool-output PII scanning described below.
+AgentDojo's `important_instructions` attack is the concrete known example:
+its payload is inserted into tool output, where Gate's input-stage injection
+detection cannot observe it. This is a known gap, not a claim that the
+existing LLM01 policy protects indirect injection, and it is why the
+AgentDojo defense cells for `important_instructions` remain cancelled.
+
+#### Tool-output PII scanning (GATE_SCAN_TOOL_OUTPUT, opt-in, default off)
+
+Presidio (LLM02) can optionally scan the latest tool-role message for PII and
+secret egress. This closes part of the input-stage gap above for LLM02
+egress only — it provides no LLM01/injection coverage, redacts rather than
+blocks (a tool-role message a client receives as malformed or as a 400 is
+indistinguishable from a transport failure to a standard agent loop), and is
+opt-in because Presidio's false-positive behavior on structured tool content
+was unmeasured before it was. Measured against a 36-case, four-band benign
+tool-output corpus (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
+adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span cases) with the
+real Presidio detector, one case in the redaction-span band mismatched.
+
+Two coverage gaps this measurement surfaced, both structural to Presidio's
+configured recognizer set (`gate/detectors/pii_entities.yaml`: EMAIL_ADDRESS,
+PHONE_NUMBER, CREDIT_CARD, US_SSN only — no financial-identifier recognizer):
+
+- No financial-identifier coverage. A bank routing number is misclassified
+  as PHONE_NUMBER via digit-pattern overlap and gets redacted even though it
+  is not PII (measured: `span-account-routing-001`). IBANs and plain account
+  numbers were not misclassified in this corpus, but that is an absence of a
+  recognizer, not a verified absence of risk.
+- SSNs in the JSON field shape that dominates real tool output
+  (`{"ssn": "078-05-1120"}`) are not detected at all — the US_SSN recognizer
+  as configured requires prose context. This is a false negative in the
+  feature's primary use case, not just an edge case. Even when an SSN is
+  detected via spelled-out prose context, it is labelled PHONE_NUMBER rather
+  than US_SSN, so `entities` in `detector_signals` cannot be relied on for
+  grouping or reporting by entity type.
+
+Redaction is a literal string splice: Presidio's matched span excludes the
+surrounding quote characters and the replacement text `[REDACTED]` contains
+no JSON-special characters, so every redacted case observed during
+measurement — including the routing-number false positive — remained valid
+JSON after redaction. This was checked empirically against the cases in the
+corpus above; it is not a structural guarantee for arbitrary payloads.
+
+Tool-output PII scanning therefore provides **partial** PII egress coverage,
+not comprehensive coverage, and provides no protection against tool-output
+prompt injection.
 
 Tool-call arguments are also not scanned by the output-stage leak detector.
 Restoring faithful tool-call SSE passthrough therefore restores an unmonitored
