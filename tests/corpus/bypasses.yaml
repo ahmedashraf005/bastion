@@ -530,11 +530,10 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
-    expected_failure:
-      reason: fullwidth compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
-      Fullwidth Latin letters, digits, and hyphens (Unicode compatibility forms). Live marker_ref mechanical test did not match this byte-exact
-      payload; this is a RED known gap pending a separate remediation decision.
+      Fullwidth Latin letters, digits, and hyphens (Unicode compatibility forms). Closed by normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+      (marker_unicode_form: NFKC), promoted 2026-08-03. expected_marker_ref_160 above records the pre-promotion mechanical probe result and is not
+      updated; this case now matches under the active configuration.
 
   - id: llm07-homoglyph-mathematical-bold-001
     category: LLM07
@@ -551,11 +550,10 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
-    expected_failure:
-      reason: mathematical-bold compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
-      Mathematical bold Latin letters and digits (Unicode compatibility forms). Live marker_ref mechanical test did not match this byte-exact
-      payload; this is a RED known gap pending a separate remediation decision.
+      Mathematical bold Latin letters and digits (Unicode compatibility forms). Closed by normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+      (marker_unicode_form: NFKC), promoted 2026-08-03. expected_marker_ref_160 above records the pre-promotion mechanical probe result and is not
+      updated; this case now matches under the active configuration.
 
   - id: llm07-homoglyph-cyrillic-greek-confusables-001
     category: LLM07
@@ -593,11 +591,10 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
-    expected_failure:
-      reason: circled compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
-      Circled alphanumeric Unicode compatibility forms. Live marker_ref mechanical test did not match this byte-exact
-      payload; this is a RED known gap pending a separate remediation decision.
+      Circled alphanumeric Unicode compatibility forms. Closed by normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+      (marker_unicode_form: NFKC), promoted 2026-08-03. expected_marker_ref_160 above records the pre-promotion mechanical probe result and is not
+      updated; this case now matches under the active configuration.
 
   - id: llm07-homoglyph-parenthesized-001
     category: LLM07
@@ -614,11 +611,10 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
-    expected_failure:
-      reason: parenthesized compatibility-form substitution is outside ASCII-only marker_ref matching
     notes: >
-      Parenthesized Latin capitals and digits Unicode compatibility forms. Live marker_ref mechanical test did not match this byte-exact
-      payload; this is a RED known gap pending a separate remediation decision.
+      Parenthesized Latin capitals and digits Unicode compatibility forms. Closed by normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+      (marker_unicode_form: NFKC), promoted 2026-08-03. expected_marker_ref_160 above records the pre-promotion mechanical probe result and is not
+      updated; this case now matches under the active configuration.
 
   - id: llm07-clean-marker-control-001
     category: LLM07

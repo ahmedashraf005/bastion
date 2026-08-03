@@ -1,10 +1,45 @@
+# Deactivated 2026-08-03, NOT removed. Gate enforces exactly one active
+# entry per manifest (gate/app/policy_profile.py:active_manifest_version
+# raises on more than one active version_id — it backs the single
+# gate_normalization_version_id recorded per campaign/request). This entry
+# already had zero effect on live detection before this change — see
+# docs/design/value-anchored-marker-detection.md, "Promoted-rule
+# reachability is not guaranteed by the promotion gates" — so deactivating
+# it changes no actual behavior. It remains fully intact and becomes live
+# again (unchanged) the moment the baseline strip_separators pattern is
+# reactivated; do not delete it.
 - version_id: normalization-e40488d4-f3a6-427b-b1aa-62b04b0271e1
   proposal_id: e40488d4-f3a6-427b-b1aa-62b04b0271e1
   origin_finding_id: be3ca489-38cf-4ab0-bd40-6ada903d0c3e
   detector: system_prompt_leak
-  active: true
+  active: false
   operation: add
   unicode_categories:
   - Cf
   named_classes: []
   codepoints: []
+
+# Signed off. Promoted after: Step 1 hypothesis verification, Step 2
+# pipeline-placement rationale, Step 3 corpus measurement (bypass 29+6 ->
+# 33+2, benign 0/48 unchanged with zero verdict changes), Step 4 blast-radius
+# audit, and the max_source_span margin check (closest currently-passing
+# case unaffected by NFKC; only these four cases' span changes at all). See
+# docs/design/nfkc-marker-normalization.md for the full record. A live
+# branching-campaign confirmation follows this promotion.
+#
+# origin_finding_id deviates from this manifest's normal convention (a real
+# strike.findings UUID reached via normalization_proposals and
+# apply_approved_normalizations.py). No live Strike finding backs this
+# proposal — it closes four evidence-verified static bypass-corpus
+# residuals (mechanical_live_gate_test provenance), not a campaign finding.
+# Flagged explicitly rather than fabricating a finding UUID.
+- version_id: normalization-b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+  proposal_id: b7b3cad1-fb2f-4d03-8338-7bd01762eb23
+  origin_finding_id: bypass-corpus:llm07-homoglyph-fullwidth-001,llm07-homoglyph-mathematical-bold-001,llm07-homoglyph-circled-001,llm07-homoglyph-parenthesized-001
+  detector: system_prompt_leak
+  active: true
+  operation: add
+  unicode_categories: []
+  named_classes: []
+  codepoints: []
+  marker_unicode_form: NFKC

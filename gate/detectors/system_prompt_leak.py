@@ -55,6 +55,11 @@ class PromotedNormalization(BaseModel):
     unicode_categories: list[str] = []
     named_classes: list[str] = []
     codepoints: list[str] = []
+    # Scoped to the marker_ref match path only (see
+    # SystemPromptLeakDetector._marker_unicode_form) — unlike the three
+    # fields above, this never reaches _should_strip, so it cannot affect
+    # the literal/regex strip_separators path.
+    marker_unicode_form: Literal["NFKC"] | None = None
 
 
 class DetectorPatternVersion(BaseModel):
@@ -168,6 +173,12 @@ class SystemPromptLeakDetector:
             for item in active
             for codepoint in item.codepoints
         )
+        marker_forms = {item.marker_unicode_form for item in active if item.marker_unicode_form}
+        if len(marker_forms) > 1:
+            raise RuntimeError(
+                f"conflicting active marker_unicode_form values: {sorted(marker_forms)}"
+            )
+        self._marker_unicode_form: str | None = next(iter(marker_forms), None)
 
     @classmethod
     def from_yaml(
@@ -313,6 +324,33 @@ class SystemPromptLeakDetector:
         return "".join(normalized_characters), index_map
 
     @staticmethod
+    def _form_normalize_with_index_map(content: str, form: str) -> tuple[str, list[int]]:
+        """Apply a Unicode normalization form character-by-character, keeping a
+        source-index map so a span found in the normalized text can be
+        translated back to raw content indexes for redaction.
+
+        Deliberately per-character, not unicodedata.normalize(form, content)
+        on the whole string: whole-string NFKC also performs canonical
+        composition across adjacent characters (e.g. a bare base letter
+        followed by a standalone combining accent can compose into one
+        precomposed accented letter), which would change spans this
+        detector currently classifies correctly by a mechanism unrelated to
+        compatibility-form substitution. Verified equivalent to whole-string
+        NFKC for every corpus payload this change targets; the one payload
+        in the full bypass+benign corpus where they diverge (interleaved
+        standalone combining accents) is left untouched by the per-character
+        form, which is the conservative, correct choice here.
+        """
+
+        normalized_characters: list[str] = []
+        index_map: list[int] = []
+        for original_index, character in enumerate(content):
+            for normalized_character in unicodedata.normalize(form, character):
+                normalized_characters.append(normalized_character)
+                index_map.append(original_index)
+        return "".join(normalized_characters), index_map
+
+    @staticmethod
     def _marker_char_equal(character: str, expected: str) -> bool:
         """Compare ASCII marker letters without Unicode case-folding."""
 
@@ -382,11 +420,26 @@ class SystemPromptLeakDetector:
         spans: list[tuple[int, int]] = []
         normalized_content: str | None = None
         index_map: list[int] | None = None
+        marker_normalized_content: str | None = None
+        marker_index_map: list[int] | None = None
 
         for pattern in self._patterns:
             if pattern.definition.pattern_type == "marker_ref":
                 assert pattern.marker is not None
-                pattern_spans = self._marker_ref_spans(content, pattern.marker)
+                if self._marker_unicode_form is None:
+                    pattern_spans = self._marker_ref_spans(content, pattern.marker)
+                else:
+                    if marker_normalized_content is None or marker_index_map is None:
+                        marker_normalized_content, marker_index_map = (
+                            self._form_normalize_with_index_map(
+                                content, self._marker_unicode_form
+                            )
+                        )
+                    raw_spans = self._marker_ref_spans(marker_normalized_content, pattern.marker)
+                    pattern_spans = [
+                        (marker_index_map[start], marker_index_map[end - 1] + 1)
+                        for start, end in raw_spans
+                    ]
             elif pattern.definition.normalize == "strip_separators":
                 if normalized_content is None or index_map is None:
                     normalized_content, index_map = self._strip_separators_with_index_map(
