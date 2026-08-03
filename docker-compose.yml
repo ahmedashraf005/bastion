@@ -137,6 +137,12 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: postgres
+      # Postgres always listens on 5432 inside the Docker network regardless
+      # of POSTGRES_PORT, which only remaps the host-side binding. Override
+      # here so changing POSTGRES_PORT to avoid a host conflict cannot break
+      # Control's connection the way it would if this inherited the env_file
+      # value.
+      POSTGRES_PORT: "5432"
       CONTROL_LISTEN_HOST: 0.0.0.0
       CONTROL_PORT: 5080
     depends_on:

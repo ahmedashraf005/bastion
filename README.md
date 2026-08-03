@@ -61,21 +61,57 @@ not additional runtime dependencies.
 ## Quickstart
 
 The supported path is Docker Compose plus host-native Ollama. Install Ollama
-on the host, configure its service to listen on `0.0.0.0:11434` so Docker can
-reach it, and pull the two required local models first:
+on the host, then set it to listen on all interfaces (Docker reaches the host
+through `host.docker.internal`, not `localhost`, so the default
+127.0.0.1-only bind will not work):
+
+```bash
+# macOS
+launchctl setenv OLLAMA_HOST "0.0.0.0:11434"
+# then quit and reopen the Ollama app (or `brew services restart ollama`
+# if you installed it via Homebrew as a service)
+
+# Linux (systemd)
+sudo systemctl edit ollama.service
+# add under [Service]: Environment="OLLAMA_HOST=0.0.0.0:11434"
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+```
+
+Then pull the two required local models and install Bastion into a virtual
+environment:
 
 ```bash
 ollama pull llama3.1:8b
 ollama pull nomic-embed-text
 cp .env.example .env
+python3 -m venv .venv
+source .venv/bin/activate
 python3 -m pip install -e .
 bastion gate up
 ```
 
+`pip install -e .` must run inside a virtual environment: recent Python
+distributions (Homebrew, python.org installers) reject system-wide installs
+with an `externally-managed-environment` error (PEP 668). Reactivate the venv
+(`source .venv/bin/activate`) in any new shell before running `bastion`.
+
 `bastion gate up` waits for Postgres, Gate, SampleBank, Control, the dashboard,
 and the model warmup service. `HF_TOKEN` is optional: without it, Gate prints
 an explicit warning and runs with LLM02 and LLM07 while Prompt Guard LLM01 is
-inactive. To run a reviewed campaign after the stack is healthy:
+inactive.
+
+**Timing, measured end to end from a fresh clone:** pulling the two Ollama
+models cold (~5.2 GB total) took 6m15s on a ~14 MB/s connection — this
+dominates first-run setup and varies with your link. `bastion gate up`
+(Docker image build plus health waits, with base images already cached
+locally) took ~30s; building the Strike image and running the demo campaign
+below took another ~45s. If your Docker base images (`python:3.14-slim`,
+`node:22-alpine`, `nginx:1.27-alpine`, `postgres:17.10-alpine`,
+`valkey:9.1.0-alpine`) aren't cached yet, add their pull time on top. With
+both models already cached, the whole quickstart after `git clone` is
+closer to a minute.
+
+To run a reviewed campaign after the stack is healthy:
 
 ```bash
 bastion strike run --config strike/attempts/canary_leak.yaml
