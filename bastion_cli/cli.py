@@ -225,6 +225,28 @@ def command_strike_run(args: argparse.Namespace) -> int:
     return compose(root, *compose_args)
 
 
+def command_report(args: argparse.Namespace) -> int:
+    root = project_root()
+    compose_ready(root)
+    # Strike is behind the manual profile; see command_strike_run.
+    compose(root, "--profile", "manual", "build", "strike")
+    return compose(
+        root,
+        "--profile",
+        "manual",
+        "run",
+        "--rm",
+        "strike",
+        "python",
+        "-m",
+        "strike.report",
+        "--campaign",
+        args.campaign,
+        "--format",
+        args.format,
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     root_parser = argparse.ArgumentParser(
         prog="bastion", description="Run the Bastion local MVP through Docker Compose"
@@ -247,6 +269,11 @@ def parser() -> argparse.ArgumentParser:
         help="planner provider (default: ollama; openai uses your paid API key)",
     )
     run.set_defaults(handler=command_strike_run)
+
+    report = commands.add_parser("report", help="read-only report over one campaign")
+    report.add_argument("--campaign", required=True, help="campaign UUID")
+    report.add_argument("--format", choices=("text", "json"), default="text")
+    report.set_defaults(handler=command_report)
     return root_parser
 
 

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from bastion_cli.cli import (
     CliError,
     check_no_project_collision,
+    command_report,
     command_strike_run,
     default_project_name,
     ensure_project_name_persisted,
@@ -52,6 +53,27 @@ class CliTests(unittest.TestCase):
                     for call in compose_call.call_args_list
                 )
             )
+
+    def test_report_rebuilds_manual_image_and_invokes_strike_report(self) -> None:
+        args = parser().parse_args(
+            ["report", "--campaign", "a35e6fdb-f19c-4b69-99b0-87b7790d256d", "--format", "json"]
+        )
+        with patch("bastion_cli.cli.compose_ready"), patch(
+            "bastion_cli.cli.compose", return_value=0
+        ) as compose_call:
+            self.assertEqual(command_report(args), 0)
+        self.assertTrue(
+            any(
+                call.args[1:5] == ("--profile", "manual", "build", "strike")
+                for call in compose_call.call_args_list
+            )
+        )
+        self.assertTrue(
+            any(
+                "strike.report" in call.args and "--format" in call.args and "json" in call.args
+                for call in compose_call.call_args_list
+            )
+        )
 
     def test_default_project_name_is_unique_per_checkout_path(self) -> None:
         with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
