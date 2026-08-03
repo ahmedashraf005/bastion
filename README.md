@@ -58,6 +58,17 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
 The repository currently contains 14 ADR documents; they describe decisions,
 not additional runtime dependencies.
 
+## Benchmarks
+
+[`docs/benchmarks/agentdojo.md`](docs/benchmarks/agentdojo.md) measures two
+local Ollama models against ETH Zurich's AgentDojo banking suite under the
+`important_instructions` injection attack. The headline: qwen2.5:7b is
+roughly twice as capable as llama3.1:8b on this suite (50% vs 25% benign
+utility) and meaningfully more susceptible to the injection (18.75% vs
+0.00% targeted ASR) — capability and injectability moved together. Not
+comparable to AgentDojo's published hosted-model results; see the doc for
+why, and for why Gate itself isn't in scope yet.
+
 ## Quickstart
 
 The supported path is Docker Compose plus host-native Ollama. Install Ollama
