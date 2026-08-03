@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -40,10 +42,90 @@ def require_docker() -> None:
         raise CliError(f"Docker is not running; start Docker Desktop and retry{suffix}")
 
 
+def default_project_name(root: Path) -> str:
+    """Derive a Compose project name unique to this checkout's absolute path.
+
+    docker-compose.yml has no top-level `name:`, so two independent checkouts
+    never collide on the literal "bastion" project unless a user explicitly
+    overrides COMPOSE_PROJECT_NAME to force it.
+    """
+
+    digest = hashlib.sha1(str(root.resolve()).encode()).hexdigest()[:10]
+    return f"bastion-{digest}"
+
+
+def read_dotenv_value(root: Path, key: str) -> str | None:
+    """Read one KEY=value line from .env without a parser dependency.
+
+    docker compose auto-loads .env for its own substitutions, but this CLI
+    decides the project name in Python before invoking compose, so it must
+    read .env itself to honor a value set there rather than only in the
+    shell environment.
+    """
+
+    env_path = root / ".env"
+    if not env_path.is_file():
+        return None
+    prefix = f"{key}="
+    for line in env_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].strip()
+    return None
+
+
+def resolve_project_name(root: Path) -> str:
+    """Shell env wins, then .env, then a checkout-derived default."""
+
+    return (
+        os.environ.get("COMPOSE_PROJECT_NAME")
+        or read_dotenv_value(root, "COMPOSE_PROJECT_NAME")
+        or default_project_name(root)
+    )
+
+
+def check_no_project_collision(root: Path, project_name: str) -> None:
+    """Refuse to proceed if another checkout already owns this project name.
+
+    Without this, `docker compose up` silently recreates whatever containers
+    already hold that name using *this* checkout's .env and image, even if
+    they belong to a different clone entirely — including disabling that
+    other checkout's HF_TOKEN-gated Prompt Guard if this one's .env lacks it.
+    """
+
+    probe = subprocess.run(
+        ["docker", "compose", "ls", "--all", "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        return
+    try:
+        projects = json.loads(probe.stdout)
+    except json.JSONDecodeError:
+        return
+    resolved_root = str(root.resolve())
+    for project in projects:
+        if project.get("Name") != project_name:
+            continue
+        config_files = project.get("ConfigFiles", "")
+        other_dirs = {str(Path(f).resolve().parent) for f in config_files.split(",") if f}
+        if other_dirs and resolved_root not in other_dirs:
+            raise CliError(
+                f"COMPOSE_PROJECT_NAME={project_name!r} is already in use by a checkout at "
+                f"{', '.join(sorted(other_dirs))}, not this one ({resolved_root}); "
+                "bringing this stack up would silently recreate that checkout's containers "
+                "with this checkout's .env. Unset COMPOSE_PROJECT_NAME to use a "
+                "checkout-derived default, or set it to something unique to this clone."
+            )
+
+
 def compose(root: Path, *args: str, check: bool = True) -> int:
     """Run Compose from the repository root, preserving its operator output."""
 
-    result = subprocess.run(["docker", "compose", *args], cwd=root, check=False)
+    env = os.environ | {"COMPOSE_PROJECT_NAME": resolve_project_name(root)}
+    result = subprocess.run(["docker", "compose", *args], cwd=root, env=env, check=False)
     if check and result.returncode != 0:
         raise CliError(
             f"Docker Compose failed (exit {result.returncode}); run `docker compose {' '.join(args)}` for full diagnostics"
@@ -53,6 +135,7 @@ def compose(root: Path, *args: str, check: bool = True) -> int:
 
 def compose_ready(root: Path) -> None:
     require_docker()
+    check_no_project_collision(root, resolve_project_name(root))
     compose(root, "up", "-d", "--build", "--wait")
 
 
@@ -60,6 +143,7 @@ def command_gate(args: argparse.Namespace) -> int:
     root = project_root()
     require_docker()
     if args.action == "up":
+        check_no_project_collision(root, resolve_project_name(root))
         compose(root, "up", "-d", "--build", "--wait")
     elif args.action == "down":
         compose(root, "down")

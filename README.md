@@ -122,3 +122,14 @@ that requires the caller's `OPENAI_API_KEY` and incurs that provider's cost;
 there is no silent fallback. For the containerized Linux inference path, stop
 host Ollama and use both `COMPOSE_OLLAMA_BASE_URL=http://ollama:11434` and
 `docker compose --profile local-inference up`.
+
+### Running more than one checkout
+
+`bastion` derives its Compose project name from this checkout's absolute
+path, so a second clone never recreates the first one's containers using the
+second's `.env` — that used to happen silently (including disabling the
+first checkout's `HF_TOKEN`-gated Prompt Guard) because `docker-compose.yml`
+pinned a single literal project name. If you want a stable, predictable name
+for a given checkout instead of the derived one, set `COMPOSE_PROJECT_NAME`
+in its `.env`; `bastion` refuses to proceed with a clear error if that name
+is already owned by a different checkout on the same machine.
