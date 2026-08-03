@@ -51,6 +51,25 @@ class CampaignTerminalErrorTests(unittest.TestCase):
         self.assertAlmostEqual(estimate["total_seconds"], 452.692)
         self.assertLess(estimate["total_seconds"], attempts_file.max_wall_clock_seconds or 0)
 
+    def test_static_smoke_campaign_feasibility_uses_actual_attempt_count(self) -> None:
+        """A static attempts list's query count is known exactly, not bounded by max_queries.
+
+        Estimating from the 50-query safety default here produced a large
+        negative headroom for canary_leak.yaml even though it always issues
+        exactly len(attempts) queries and finishes in seconds.
+        """
+
+        attempts_file = load_attempts(Path("strike/attempts/canary_leak.yaml"))
+
+        self.assertEqual(attempts_file.attempt_source, "static")
+        self.assertEqual(len(attempts_file.attempts or []), 5)
+        estimate = feasibility_estimate(attempts_file, max_queries=50)
+        self.assertEqual(estimate["expected_queries"], 5)
+        self.assertEqual(estimate["expected_rounds"], 5)
+        self.assertEqual(estimate["drift_seconds"], 0.0)
+        self.assertGreater(estimate["total_seconds"], 0)
+        self.assertLess(estimate["total_seconds"], 300)
+
     def test_active_gate_manifest_versions_are_recordable_independently(self) -> None:
         self.assertEqual(
             active_gate_manifest_versions(),

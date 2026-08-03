@@ -104,18 +104,47 @@ inactive.
 models cold (~5.2 GB total) took 6m15s on a ~14 MB/s connection — this
 dominates first-run setup and varies with your link. `bastion gate up`
 (Docker image build plus health waits, with base images already cached
-locally) took ~30s; building the Strike image and running the demo campaign
-below took another ~45s. If your Docker base images (`python:3.14-slim`,
-`node:22-alpine`, `nginx:1.27-alpine`, `postgres:17.10-alpine`,
-`valkey:9.1.0-alpine`) aren't cached yet, add their pull time on top. With
-both models already cached, the whole quickstart after `git clone` is
-closer to a minute.
+locally) took ~30s; building the Strike image and running the smoke-test
+campaign below took another ~45s. If your Docker base images
+(`python:3.14-slim`, `node:22-alpine`, `nginx:1.27-alpine`,
+`postgres:17.10-alpine`, `valkey:9.1.0-alpine`) aren't cached yet, add their
+pull time on top. With both models already cached, the whole quickstart
+through the smoke test after `git clone` is closer to a minute; the
+branching campaign described next adds its own ~5 minutes on top of that.
 
-To run a reviewed campaign after the stack is healthy:
+### Two demo campaigns
+
+Once the stack is healthy, there are two reviewed campaigns to run — they
+demonstrate different things and take very different amounts of time.
+
+**Smoke test (~15s):** a fixed list of 5 hand-written attempts against
+Gate's output-stage redaction. It confirms Gate, SampleBank, Postgres, and
+Strike are wired together end to end — nothing more. It does not exercise
+the red-team engine.
 
 ```bash
 bastion strike run --config strike/attempts/canary_leak.yaml
 ```
+
+**The actual demonstration (~5 minutes):** a TAP-style branching campaign —
+adaptive planning, PruneGate scoring candidates, and the Valkey-backed
+StrategyLibrary — searching for the same objective within a 20-query / 600s
+budget.
+
+```bash
+bastion strike run --config strike/attempts/canary_leak_branching.yaml
+```
+
+**Expect it to find nothing.** Against Gate's hardened default policy
+profile, this is the correct outcome, not a failure: it means Gate held.
+What it demonstrates is the search itself — branching candidates generated
+and pruned each round, every attempt persisted with a scored outcome, and
+the campaign completing cleanly within budget. Watch it live on the
+dashboard (`http://localhost:5173` once `bastion gate up` is healthy) while
+it runs. A found bypass would trigger the Rule Synthesizer's proposal flow
+for human sign-off; that loop is real but not guaranteed on any given run
+against a hardened target, and this repository does not claim it has been
+demonstrated end to end.
 
 The default planner is local Ollama. `--planner openai` is an explicit opt-in
 that requires the caller's `OPENAI_API_KEY` and incurs that provider's cost;

@@ -205,18 +205,30 @@ def feasibility_estimate(
     """Estimate campaign duration from the recorded preflight measurement.
 
     This is an operator-facing estimate, not a scheduling guard: target and
-    planner behavior can still vary at runtime.
+    planner behavior can still vary at runtime. A static attempt source
+    replays a finite, pre-written list with no planner call per attempt, so
+    its query count and drift are known exactly up front rather than bounded
+    by max_queries (a safety cap the static list may never approach) — using
+    max_queries there produced a large, alarming negative headroom on runs
+    that in fact complete comfortably within seconds.
     """
 
-    queries_per_round = (
-        attempts_file.beam_width if attempts_file.attempt_source == "branching" else 1
-    )
-    expected_rounds = math.ceil(max_queries / (queries_per_round or 1))
-    drift_seconds = (
-        OBSERVED_PLANNER_ROUND_DRIFT_SECONDS * expected_rounds * (expected_rounds - 1) / 2
-    )
-    query_seconds = OBSERVED_TARGET_QUERY_SECONDS * max_queries
+    if attempts_file.attempt_source == "static":
+        expected_queries = len(attempts_file.attempts or [])
+        expected_rounds = expected_queries
+        drift_seconds = 0.0
+    else:
+        expected_queries = max_queries
+        queries_per_round = (
+            attempts_file.beam_width if attempts_file.attempt_source == "branching" else 1
+        )
+        expected_rounds = math.ceil(expected_queries / (queries_per_round or 1))
+        drift_seconds = (
+            OBSERVED_PLANNER_ROUND_DRIFT_SECONDS * expected_rounds * (expected_rounds - 1) / 2
+        )
+    query_seconds = OBSERVED_TARGET_QUERY_SECONDS * expected_queries
     return {
+        "expected_queries": expected_queries,
         "expected_rounds": expected_rounds,
         "query_seconds": query_seconds,
         "drift_seconds": drift_seconds,
@@ -612,6 +624,7 @@ async def run_campaign(
     print(
         "campaign_feasibility_estimate"
         f" campaign_id={campaign_id} max_queries={max_queries}"
+        f" expected_queries={estimate['expected_queries']}"
         f" observed_target_query_seconds={OBSERVED_TARGET_QUERY_SECONDS:.4f}"
         f" expected_rounds={estimate['expected_rounds']}"
         f" estimated_query_seconds={estimate['query_seconds']:.3f}"
