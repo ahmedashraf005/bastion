@@ -24,9 +24,25 @@ BENIGN_BANDS = frozenset(
 # false-positive class benign.yaml (English-only) is structurally blind to.
 # Band assignment for any file here must be fixed at authoring time, same
 # rule as benign.yaml itself.
+#
+# tool_output_injection.yaml is NOT a benign corpus (every case has
+# expect: block) and is NOT a regression suite with pass/fail assertions —
+# see its own header comment. It rides this same loader purely for its
+# band/manifest validation; it deliberately avoids the band name
+# "redaction_span" so the expected_redacted_content coupling below (tied to
+# that literal band name, not to any general concept) stays inert for it.
 CORPUS_BAND_SETS: dict[str, frozenset[str]] = {
     "benign.yaml": BENIGN_BANDS,
     "benign_tool_output.yaml": BENIGN_BANDS | frozenset({"mixed_script"}),
+    "tool_output_injection.yaml": frozenset(
+        {
+            "direct_override",
+            "captured_transcript",
+            "structured_smuggling",
+            "document_content",
+            "error_and_metadata",
+        }
+    ),
 }
 BANDED_CORPUS_FILENAMES = frozenset(CORPUS_BAND_SETS)
 
