@@ -71,10 +71,15 @@ class CampaignTerminalErrorTests(unittest.TestCase):
         self.assertLess(estimate["total_seconds"], 300)
 
     def test_active_gate_manifest_versions_are_recordable_independently(self) -> None:
+        # The expected normalization_version_id here must track whichever
+        # entry in gate/detectors/normalization_versions.yaml is currently
+        # active: it was normalization-e40488d4 (Cf category), then
+        # normalization-b7b3cad1 (NFKC) after that promotion, and is now
+        # normalization-87f46a8c (NFKC + confusables) after that one.
         self.assertEqual(
             active_gate_manifest_versions(),
             {
-                "gate_normalization_version_id": "normalization-e40488d4-f3a6-427b-b1aa-62b04b0271e1",
+                "gate_normalization_version_id": "normalization-87f46a8c-0651-4588-bd75-a54dd702ddcb",
                 "gate_pattern_version_id": "marker-ref-af44335a-9f28-4547-b857-ac7cc53d1e8a",
             },
         )

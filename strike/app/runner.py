@@ -43,6 +43,7 @@ from .success_contract import (
     resolve_marker_ref,
 )
 from gate.app.policy_profile import active_manifest_version, resolve_policy_profile
+from gate.app.text_sanitization import strip_nul_bytes, strip_nul_bytes_from_all
 from strike.planner.attacker import AttackerPlanner, PlannerGenerationError
 from strike.planner.strategy_library import StrategyLibrary
 from strike.synthesizer.rule_synthesizer import FindingEvidence, RuleSynthesizer
@@ -471,7 +472,27 @@ async def persist_attempt(
     # Context shown to the planner, not proof that any candidate used it.
     retrieved_strategy_ids: list[str] | None = None,
 ) -> uuid.UUID:
-    """Persist one executed attempt before campaign execution continues."""
+    """Persist one executed attempt before campaign execution continues.
+
+    Planner- and target-generated text is sanitized here, immediately
+    before the write, not upstream: scoring (matched, outcome) has already
+    happened against the original content by the time this is called, so a
+    sanitized payload scores exactly as it would have. Postgres cannot
+    store an embedded NUL byte in any text or JSONB column; stripping one
+    is recorded on the row (`sanitized`), never silent.
+    """
+
+    sanitized_fields, sanitized = strip_nul_bytes(
+        {
+            "planner_reasoning": planner_reasoning,
+            "attack_turns": attack_turns,
+            "target_error": target_error,
+            "target_reply": target_reply,
+            "normalization_evidence": normalization_evidence,
+            "prune_reason": prune_reason,
+            "retrieved_strategy_ids": retrieved_strategy_ids,
+        }
+    )
 
     attempt_id = new_attempt_id()
     await connection.execute(
@@ -480,21 +501,22 @@ async def persist_attempt(
             campaign_id=campaign_id,
             sequence_number=sequence_number,
             source=source,
-            planner_reasoning=planner_reasoning,
-            attack_turns=attack_turns,
+            planner_reasoning=sanitized_fields["planner_reasoning"],
+            attack_turns=sanitized_fields["attack_turns"],
             target_status=target_status,
-            target_error=target_error,
-            target_reply=target_reply,
+            target_error=sanitized_fields["target_error"],
+            target_reply=sanitized_fields["target_reply"],
             matched=matched,
             outcome=outcome,
-            normalization_evidence=normalization_evidence,
+            normalization_evidence=sanitized_fields["normalization_evidence"],
             parent_node_id=parent_node_id,
             gate_request_id=gate_request_id,
             round_number=round_number,
             pruned=pruned,
-            prune_reason=prune_reason,
+            prune_reason=sanitized_fields["prune_reason"],
             prune_score=prune_score,
-            retrieved_strategy_ids=retrieved_strategy_ids,
+            retrieved_strategy_ids=sanitized_fields["retrieved_strategy_ids"],
+            sanitized=sanitized,
         )
     )
     return attempt_id
@@ -753,20 +775,33 @@ async def run_campaign(
                         if round_result.match_outcome is not None:
                             matched_outcome = round_result.match_outcome
                             finding_id = new_finding_id()
+                            # Sanitized independently of persist_attempt's own
+                            # sanitization above: this reads the matched
+                            # outcome's original attributes directly, not the
+                            # already-sanitized `turns` local, so it needs its
+                            # own pass immediately before this write too.
+                            (
+                                (finding_attack_turns, finding_target_reply),
+                                finding_sanitized,
+                            ) = strip_nul_bytes_from_all(
+                                [
+                                    {
+                                        "role": "user",
+                                        "content": matched_outcome.planner_attempt.user_message,
+                                    }
+                                ],
+                                matched_outcome.target_reply,
+                            )
                             await connection.execute(
                                 sa.insert(findings).values(
                                     id=finding_id,
                                     campaign_id=campaign_id,
                                     owasp_id=attempts_file.owasp_id,
-                                    attack_turns=[
-                                        {
-                                            "role": "user",
-                                            "content": matched_outcome.planner_attempt.user_message,
-                                        }
-                                    ],
-                                    target_reply=matched_outcome.target_reply,
+                                    attack_turns=finding_attack_turns,
+                                    target_reply=finding_target_reply,
                                     matched_pattern=attempts_file.success.marker_ref,
                                     gate_request_id=matched_outcome.gate_request_id,
+                                    sanitized=finding_sanitized,
                                 )
                             )
                             await connection.commit()
@@ -980,16 +1015,36 @@ async def run_campaign(
                         continue
 
                     finding_id = new_finding_id()
+                    # Independent sanitization pass, same reasoning as the
+                    # branching-path findings insert above: `turns` was
+                    # already sanitized for the persist_attempt() call for
+                    # this same attempt, but that sanitization produced a
+                    # local copy and did not mutate this variable.
+                    #
+                    # NOTE: this insert also passes normalization_evidence,
+                    # which is not a column on strike.findings (see
+                    # strike/app/database.py) — a separate, pre-existing bug
+                    # unrelated to NUL sanitization, left untouched here
+                    # since it is out of this fix's scope. This code path
+                    # (a "planner"-source, non-branching attempt reaching a
+                    # confirmed match) has apparently never executed against
+                    # a real campaign in this project, or this would already
+                    # have been caught.
+                    (
+                        (static_finding_attack_turns, static_finding_target_reply),
+                        static_finding_sanitized,
+                    ) = strip_nul_bytes_from_all(turns, reply)
                     await connection.execute(
                         sa.insert(findings).values(
                             id=finding_id,
                             campaign_id=campaign_id,
                             owasp_id=attempts_file.owasp_id,
-                            attack_turns=turns,
-                            target_reply=reply,
+                            attack_turns=static_finding_attack_turns,
+                            target_reply=static_finding_target_reply,
                             normalization_evidence=evaluation.normalization_evidence,
                             matched_pattern=attempts_file.success.marker_ref,
                             gate_request_id=parse_gate_request_id(response_body),
+                            sanitized=static_finding_sanitized,
                         )
                     )
                     await connection.commit()

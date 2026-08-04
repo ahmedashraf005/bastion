@@ -123,6 +123,67 @@ class RemediationBucketTests(unittest.TestCase):
         self.assertEqual(report.remediation_buckets["requires_architectural_decision"], [])
 
 
+class SanitizedFlagVisibilityTests(unittest.TestCase):
+    """The sanitization flag (a NUL byte was stripped before persistence)
+    must be visible in bastion report output, not just in the database."""
+
+    def test_sanitized_count_reflects_flagged_attempts(self) -> None:
+        attempts = [
+            {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
+            {"id": uuid.uuid4(), "sequence_number": 2, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": False},
+            {"id": uuid.uuid4(), "sequence_number": 3, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
+        ]
+        report = build_report(_campaign_row(), attempts, [], [])
+        self.assertEqual(report.identity.sanitized_count, 2)
+
+    def test_sanitized_count_defaults_to_zero_when_column_absent_from_row(self) -> None:
+        """Older attempt rows (fetched before this column existed) must not
+        crash the report — absence reads as not sanitized."""
+
+        attempts = [
+            {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None},
+        ]
+        report = build_report(_campaign_row(), attempts, [], [])
+        self.assertEqual(report.identity.sanitized_count, 0)
+
+    def test_sanitized_count_appears_in_rendered_text(self) -> None:
+        attempts = [
+            {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
+        ]
+        report = build_report(_campaign_row(), attempts, [], [])
+        text = render_text(report)
+        self.assertIn("sanitized:", text)
+        self.assertIn("1 attempt(s) had a NUL byte stripped", text)
+
+    def test_sanitized_count_appears_in_rendered_json(self) -> None:
+        attempts = [
+            {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
+        ]
+        report = build_report(_campaign_row(), attempts, [], [])
+        payload = json.loads(render_json(report))
+        self.assertEqual(payload["identity"]["sanitized_count"], 1)
+
+    def test_finding_sanitized_flag_appears_in_rendered_text_and_json(self) -> None:
+        finding_id = uuid.uuid4()
+        findings = [
+            {
+                "id": finding_id,
+                "owasp_id": "LLM07",
+                "found_at": datetime(2026, 8, 3, tzinfo=timezone.utc),
+                "attack_turns": [{"role": "user", "content": "..."}],
+                "target_reply": "leaked",
+                "matched_pattern": "BASTION-CANARY-7K2M9QX4",
+                "sanitized": True,
+            },
+        ]
+        report = build_report(_campaign_row(), [], findings, [])
+        self.assertTrue(report.findings[0].sanitized)
+        text = render_text(report)
+        self.assertIn("sanitized:       True", text)
+        payload = json.loads(render_json(report))
+        self.assertTrue(payload["findings"][0]["sanitized"])
+
+
 class NearMissFixtureTests(unittest.TestCase):
     """Fixture built from docs/design/value-anchored-marker-detection.md's
     recorded values for attempt a8b42d5b-f7f3-4c7f-b35e-7ea6c827aaab in
@@ -284,12 +345,14 @@ class JsonSchemaStabilityTests(unittest.TestCase):
                 "node_count",
                 "pruned_count",
                 "executed_count",
+                "sanitized_count",
                 "planner_model",
                 "inference_route",
                 "inference_base_url",
                 "gate_normalization_version_id",
                 "gate_pattern_version_id",
                 "config_note",
+                "sanitized_note",
             },
         )
 

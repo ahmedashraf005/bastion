@@ -79,6 +79,13 @@ findings = sa.Table(
         server_default=sa.text("now()"),
         nullable=False,
     ),
+    # True if attack_turns or target_reply had a NUL byte (U+0000) stripped
+    # before this row was written — Postgres cannot store one at all. Never
+    # silent: this is the trace that evidence was altered at the persistence
+    # boundary. See gate/app/text_sanitization.py.
+    sa.Column(
+        "sanitized", sa.Boolean(), server_default=sa.text("false"), nullable=False
+    ),
 )
 
 proposed_rules = sa.Table(
@@ -167,6 +174,13 @@ attempts = sa.Table(
     sa.Column("prune_reason", sa.Text(), nullable=True),
     sa.Column("prune_score", sa.Double(), nullable=True),
     sa.Column("retrieved_strategy_ids", postgresql.JSONB(), nullable=True),
+    # True if any planner- or target-generated text field on this row had a
+    # NUL byte (U+0000) stripped before the write — Postgres cannot store
+    # one at all. Never silent: this is the trace that evidence was altered
+    # at the persistence boundary. See gate/app/text_sanitization.py.
+    sa.Column(
+        "sanitized", sa.Boolean(), server_default=sa.text("false"), nullable=False
+    ),
     sa.Column(
         "created_at",
         sa.DateTime(timezone=True),

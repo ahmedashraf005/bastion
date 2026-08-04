@@ -14,12 +14,13 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, insert
+from sqlalchemy import Boolean, Column, Float, Integer, MetaData, Table, Text, insert, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PostgreSQLUUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import settings
 from app.policy_profile import active_manifest_version, resolve_policy_profile
+from app.text_sanitization import strip_nul_bytes
 from detectors.base import DetectorSignal
 from detectors.presidio_pii import PresidioPiiDetector
 from detectors.prompt_guard import PromptGuardDetector
@@ -69,6 +70,11 @@ requests_table = Table(
     Column("matched_rules", JSONB, nullable=True),
     Column("detector_signals", JSONB, nullable=True),
     Column("raw_exact_marker_match", Boolean, nullable=True),
+    # True if request_body, response_body, or error had a NUL byte (U+0000)
+    # stripped before this row was written — Postgres cannot store one at
+    # all. Never silent: this is the trace that evidence was altered at the
+    # persistence boundary. See gate/app/text_sanitization.py.
+    Column("sanitized", Boolean, nullable=False, server_default=text("false")),
     schema="gate",
 )
 
@@ -330,9 +336,24 @@ async def persist_request(
     detector_signals: list[dict[str, Any]] | None = None,
     raw_exact_marker_match: bool | None = None,
 ) -> None:
-    """Best-effort persistence that never changes the proxy response."""
+    """Best-effort persistence that never changes the proxy response.
+
+    request_body and response_body are sanitized here, immediately before
+    the write, not upstream: detection and the actual proxied response have
+    already happened by the time this is called. Postgres cannot store an
+    embedded NUL byte in any text or JSONB column; stripping one is
+    recorded on the row (`sanitized`), never silent.
+    """
 
     try:
+        sanitized_fields, sanitized = strip_nul_bytes(
+            {
+                "request_body": request_body,
+                "response_body": response_body,
+                "error": error,
+                "detector_signals": detector_signals,
+            }
+        )
         database_engine: AsyncEngine = request.app.state.database_engine
         async with database_engine.begin() as connection:
             await connection.execute(
@@ -340,15 +361,16 @@ async def persist_request(
                     id=request_id,
                     model=model,
                     stream_requested=stream_requested,
-                    request_body=request_body,
-                    response_body=response_body,
+                    request_body=sanitized_fields["request_body"],
+                    response_body=sanitized_fields["response_body"],
                     upstream_status=upstream_status,
                     latency_ms=latency_ms,
-                    error=error,
+                    error=sanitized_fields["error"],
                     policy_action=policy_action,
                     matched_rules=matched_rules,
-                    detector_signals=detector_signals,
+                    detector_signals=sanitized_fields["detector_signals"],
                     raw_exact_marker_match=raw_exact_marker_match,
+                    sanitized=sanitized,
                 )
             )
     except Exception:

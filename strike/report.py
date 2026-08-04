@@ -133,12 +133,20 @@ class CampaignIdentity:
     node_count: int
     pruned_count: int
     executed_count: int
+    sanitized_count: int
     planner_model: str | None
     inference_route: str | None
     inference_base_url: str | None
     gate_normalization_version_id: str | None
     gate_pattern_version_id: str | None
     config_note: str = CONFIG_IDENTITY_NOTE
+    sanitized_note: str = (
+        "sanitized_count is how many attempts had a NUL byte (U+0000) "
+        "stripped from planner- or target-generated text before being "
+        "persisted — Postgres cannot store one at all. Evidence is never "
+        "altered silently; this count is the trace. See "
+        "gate/app/text_sanitization.py."
+    )
 
 
 @dataclass
@@ -157,6 +165,7 @@ class Finding:
     matched_pattern: str
     remediation_bucket: str
     proposed_rule_statuses: list[str]
+    sanitized: bool
     severity_note: str = SEVERITY_NOTE
 
 
@@ -221,6 +230,7 @@ def build_report(
     )
     node_count = len(attempt_rows)
     pruned_count = sum(1 for a in attempt_rows if a.get("pruned"))
+    sanitized_count = sum(1 for a in attempt_rows if a.get("sanitized"))
     identity = CampaignIdentity(
         campaign_id=str(campaign_row["id"]),
         objective=campaign_row["objective"],
@@ -236,6 +246,7 @@ def build_report(
         node_count=node_count,
         pruned_count=pruned_count,
         executed_count=node_count - pruned_count,
+        sanitized_count=sanitized_count,
         planner_model=campaign_row.get("inference_model"),
         inference_route=campaign_row.get("inference_route"),
         inference_base_url=campaign_row.get("inference_base_url"),
@@ -273,6 +284,7 @@ def build_report(
                 matched_pattern=row["matched_pattern"],
                 remediation_bucket=bucket,
                 proposed_rule_statuses=proposal_statuses,
+                sanitized=bool(row.get("sanitized")),
             )
         )
 
@@ -319,6 +331,8 @@ def render_text(report: Report) -> str:
     wall_clock = f"{i.wall_clock_seconds:.3f}s" if i.wall_clock_seconds is not None else "n/a (not ended)"
     lines.append(f"  wall clock:          {wall_clock}")
     lines.append(f"  nodes:               {i.node_count} total, {i.pruned_count} pruned, {i.executed_count} executed")
+    lines.append(f"  sanitized:           {i.sanitized_count} attempt(s) had a NUL byte stripped before persistence")
+    lines.append(f"    ({i.sanitized_note})")
     lines.append(f"  planner model:       {i.planner_model or 'n/a'}")
     lines.append(f"  inference route:     {i.inference_route or 'n/a'} ({i.inference_base_url or 'n/a'})")
     lines.append(f"  gate normalization:  {i.gate_normalization_version_id or 'n/a'}")
@@ -342,6 +356,7 @@ def render_text(report: Report) -> str:
             lines.append(f"    matched_pattern: {finding.matched_pattern}")
             lines.append(f"    target_reply:    {finding.target_reply}")
             lines.append(f"    attack_turns:    {json.dumps(finding.attack_turns)}")
+            lines.append(f"    sanitized:       {finding.sanitized}")
             lines.append(
                 f"    proposed_rules:  {finding.proposed_rule_statuses or '(none proposed)'}"
             )
@@ -418,6 +433,7 @@ async def fetch_report(campaign_id: uuid.UUID) -> Report:
                     attempts.c.outcome,
                     attempts.c.pruned,
                     attempts.c.normalization_evidence,
+                    attempts.c.sanitized,
                 ).where(attempts.c.campaign_id == campaign_id)
             )
             attempt_rows = [dict(r) for r in attempt_result.mappings()]
@@ -430,6 +446,7 @@ async def fetch_report(campaign_id: uuid.UUID) -> Report:
                     findings.c.attack_turns,
                     findings.c.target_reply,
                     findings.c.matched_pattern,
+                    findings.c.sanitized,
                 ).where(findings.c.campaign_id == campaign_id)
             )
             finding_rows = [dict(r) for r in finding_result.mappings()]
