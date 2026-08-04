@@ -130,9 +130,13 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
   `GATE_SCAN_TOOL_OUTPUT` (opt-in, default off) runs Presidio over the
   latest tool-role message and redacts matches, closing part of the LLM02
   gap above — it adds no LLM01/injection coverage. Measured against a
-  36-case, four-band benign tool-output corpus
+  37-case, four-band benign tool-output corpus
   (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
-  adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span). **This
+  adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span): zero
+  mismatches. A bank routing number was initially misclassified as a phone
+  number (PhoneRecognizer's context list includes the generic word
+  "number") and has since been fixed with a checksum-validated ABA
+  routing-number recognizer used only to suppress that collision. **This
   bullet previously claimed, incorrectly, that SSNs in JSON field form go
   undetected and require prose context — that was an artifact of the test
   case using a Presidio-blacklisted placeholder SSN, not a real gap; US_SSN

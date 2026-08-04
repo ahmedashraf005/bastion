@@ -26,20 +26,24 @@ class ToolOutputBenignCorpusTests(unittest.TestCase):
         cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
 
     def test_fixed_band_manifest_and_utf8_codepoints(self) -> None:
-        self.assertEqual(len(self.cases), 36)
+        self.assertEqual(len(self.cases), 37)
         self.assertEqual(sum(case.band == "ordinary" for case in self.cases), 12)
         self.assertEqual(sum(case.band == "adjacent_vocabulary" for case in self.cases), 8)
         self.assertEqual(sum(case.band == "structurally_awkward" for case in self.cases), 8)
-        self.assertEqual(sum(case.band == "redaction_span" for case in self.cases), 8)
+        self.assertEqual(sum(case.band == "redaction_span" for case in self.cases), 9)
         assert_declared_codepoints(self.cases)
 
     def test_report_fp_rate_per_band(self) -> None:
         """Not a pass/fail gate — prints the measured FP rate per band.
 
-        span-account-routing-001 is a KNOWN, EXPECTED mismatch (routing
-        number misclassified as PHONE_NUMBER) and is asserted explicitly
-        rather than silently counted, so a future Presidio/config change
-        that fixes or worsens it is visible here.
+        span-account-routing-001 was a measured false positive (a bank
+        routing number misclassified as PHONE_NUMBER via the generic
+        "number" context word) until the AbaRoutingRecognizer-based
+        suppression in PresidioPiiDetector._scan_blocking was added: a
+        checksum-validated ABA routing number match on the same span now
+        excludes the overlapping PHONE_NUMBER candidate before thresholding.
+        Asserted at zero explicitly, not just implied by the other bands'
+        checks, so a regression here is unambiguous.
         """
 
         async def exercise() -> dict[str, tuple[int, int, list[str]]]:
@@ -66,18 +70,13 @@ class ToolOutputBenignCorpusTests(unittest.TestCase):
             rate = mismatches / total if total else 0.0
             print(f"{band:24s} {mismatches}/{total} mismatched ({rate:.1%}) {ids}")
 
-        # Known, reported mismatch: a legitimate bank routing number
-        # (021000021) is misclassified as PHONE_NUMBER and redacted. This is
-        # the material finding from this corpus, not something to hide.
-        self.assertEqual(results["redaction_span"][2], ["span-account-routing-001"])
-
-        # Every other band and every other redaction_span case must have
-        # zero mismatches. If this fails, either a genuinely new Presidio
-        # false positive was introduced, or the corpus needs updating —
-        # either way, do not loosen this assertion without reporting why.
+        # If this fails, either a genuinely new Presidio false positive was
+        # introduced, or the corpus needs updating — either way, do not
+        # loosen this assertion without reporting why.
         self.assertEqual(results["ordinary"][1], 0)
         self.assertEqual(results["adjacent_vocabulary"][1], 0)
         self.assertEqual(results["structurally_awkward"][1], 0)
+        self.assertEqual(results["redaction_span"][1], 0)
 
 
 if __name__ == "__main__":

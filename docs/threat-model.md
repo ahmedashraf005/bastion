@@ -66,20 +66,52 @@ egress only — it provides no LLM01/injection coverage, redacts rather than
 blocks (a tool-role message a client receives as malformed or as a 400 is
 indistinguishable from a transport failure to a standard agent loop), and is
 opt-in because Presidio's false-positive behavior on structured tool content
-was unmeasured before it was. Measured against a 36-case, four-band benign
+was unmeasured before it was. Measured against a 37-case, four-band benign
 tool-output corpus (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
-adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span cases) with the
-real Presidio detector, one case in the redaction-span band mismatched.
+adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span cases) with the
+real Presidio detector: zero mismatches.
 
-Two coverage gaps this measurement surfaced, both structural to Presidio's
-configured recognizer set (`gate/detectors/pii_entities.yaml`: EMAIL_ADDRESS,
-PHONE_NUMBER, CREDIT_CARD, US_SSN only — no financial-identifier recognizer):
+A bank routing number was initially misclassified as PHONE_NUMBER and
+redacted despite not being PII (measured: `span-account-routing-001`). Root
+cause: `PhoneRecognizer`'s context word list
+(`gate/detectors/presidio_pii.py`, via `presidio-analyzer`) includes the
+generic word "number" — `PhoneRecognizer.CONTEXT = ["phone", "number",
+"telephone", "cell", "cellphone", "mobile", "call"]` — so any JSON key
+containing "number" (`routing_number`, `account_number`, and by extension
+any future financial-identifier field named similarly) boosts a
+phone-shaped digit run's score identically to a genuine phone number in the
+same shape of context (measured: both 0.750). No confidence threshold
+separates them, because the scores are identical; anyone extending this
+detector to other financial identifiers will hit the same collision if the
+field name contains "number". Fixed by registering
+`presidio_analyzer.predefined_recognizers.AbaRoutingRecognizer` (ships with
+`presidio-analyzer`, checksum-validates ABA routing numbers) and, in
+`PresidioPiiDetector._scan_blocking`, suppressing any configured-entity
+candidate whose span is fully contained in a checksum-validated ABA match
+before thresholding. `ABA_ROUTING_NUMBER` itself is never added to a
+`DetectorSignal`'s `entities` or redacted — it exists purely as an internal
+disambiguation signal. Verified co-located in the same document
+(`span-phone-and-routing-colocated-001`): a genuine phone number and a
+routing number in one payload redact and pass through correctly,
+independently of each other.
 
-- No financial-identifier coverage. A bank routing number is misclassified
-  as PHONE_NUMBER via digit-pattern overlap and gets redacted even though it
-  is not PII (measured: `span-account-routing-001`). IBANs and plain account
-  numbers were not misclassified in this corpus, but that is an absence of a
-  recognizer, not a verified absence of risk.
+Known residual tradeoff of the checksum-based fix, not eliminated: the ABA
+check digit is a single mod-10 digit over 9 digits, so roughly 1 in 10
+arbitrary 9-digit strings pass it by chance. A genuine phone number that
+happened to be a bare contiguous 9-digit run *and* coincidentally pass the
+checksum would be wrongly suppressed. This does not bite today because US
+phone numbers are 10 or 11 digits (with a country code) and never form a
+bare contiguous 9-digit run, so they never enter the suppression path in the
+first place — re-verify if `PhoneRecognizer`'s supported regions or patterns
+ever change.
+
+Presidio's configured recognizer set otherwise remains
+`gate/detectors/pii_entities.yaml`: EMAIL_ADDRESS, PHONE_NUMBER,
+CREDIT_CARD, US_SSN, plus the suppression-only ABA_ROUTING_NUMBER above — no
+general financial-identifier (IBAN, generic account number) recognizer.
+IBANs and plain account numbers were not misclassified in this corpus, but
+that is an absence of a recognizer, not a verified absence of risk.
+
 - **Corrected 2026-08-04 — the claim below was false as written and shipped
   in this document.** It previously said SSNs in JSON field form
   (`{"ssn": "078-05-1120"}`) are not detected and that US_SSN requires prose
@@ -109,9 +141,10 @@ PHONE_NUMBER, CREDIT_CARD, US_SSN only — no financial-identifier recognizer):
 Redaction is a literal string splice: Presidio's matched span excludes the
 surrounding quote characters and the replacement text `[REDACTED]` contains
 no JSON-special characters, so every redacted case observed during
-measurement — including the routing-number false positive — remained valid
-JSON after redaction. This was checked empirically against the cases in the
-corpus above; it is not a structural guarantee for arbitrary payloads.
+measurement — including the routing-number false positive before it was
+fixed — remained valid JSON after redaction. This was checked empirically
+against the cases in the corpus above; it is not a structural guarantee for
+arbitrary payloads.
 
 Tool-output PII scanning therefore provides **partial** PII egress coverage,
 not comprehensive coverage, and provides no protection against tool-output

@@ -3,7 +3,7 @@ band_manifest:
   ordinary: 12
   adjacent_vocabulary: 8
   structurally_awkward: 8
-  redaction_span: 8
+  redaction_span: 9
 cases:
   # Realistic tool-role content (JSON API responses, transaction records,
   # file contents, error strings, timestamps, IDs) with no PII/secrets.
@@ -181,9 +181,11 @@ cases:
   # Genuine PII embedded in structured tool output (must redact) and
   # legitimate non-PII financial identifiers embedded the same way (must
   # not redact). expect/expected_redacted_content reflect measured Presidio
-  # behavior at authoring time, not intended/desired behavior — see the
-  # redaction_span report note for span-account-routing-001, which redacts
-  # despite being non-PII.
+  # behavior at authoring time, not intended/desired behavior.
+  # span-account-routing-001 previously redacted despite being non-PII
+  # (a bank routing number misread as PHONE_NUMBER) until
+  # PresidioPiiDetector added ABA-checksum-based suppression — see
+  # gate/detectors/presidio_pii.py and docs/threat-model.md.
   - id: span-email-001
     band: redaction_span
     expect: redact
@@ -217,7 +219,7 @@ cases:
     band: redaction_span
     expect: allow
     payload: '{"account_number": "SB-100234871", "routing_number": "021000021"}'
-    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: measured false positive — routing_number matches PHONE_NUMBER, see report }
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: was a measured PHONE_NUMBER false positive until AbaRoutingRecognizer-based suppression, see report }
   - id: span-reference-swift-001
     band: redaction_span
     expect: allow
@@ -228,3 +230,9 @@ cases:
     expect: allow
     payload: '{"card_ending": "4821", "auth_code": "00K392"}'
     provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus }
+  - id: span-phone-and-routing-colocated-001
+    band: redaction_span
+    expect: redact
+    payload: '{"contact_phone": "+1-415-555-0148", "routing_number": "021000021"}'
+    expected_redacted_content: '{"contact_phone": "[REDACTED]", "routing_number": "021000021"}'
+    provenance: { author: Codex, authored: 2026-08-04, source: co-location check for ABA-routing suppression, note: "a genuine phone number and a routing number in the same document must not cross-contaminate — the phone still redacts, the routing number stays visible" }
