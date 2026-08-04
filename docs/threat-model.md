@@ -166,6 +166,21 @@ the first choice. Content in additional choices is unscanned. Multi-choice
 output inspection is a separate detection decision and is not implemented
 here.
 
+### Evidence persistence integrity
+
+Postgres cannot store an embedded NUL byte (U+0000) in any text or JSONB
+column at all. Planner- or target-generated content containing one used to
+crash the write outright — in Strike this terminated the whole campaign
+(`UntranslatableCharacterError`); in Gate it was caught and logged, silently
+dropping that request's audit row instead. Fixed: both now sanitize
+immediately before each write and record a `sanitized` flag on the row
+rather than altering evidence silently. See
+[`docs/design/nul-byte-persistence-fix.md`](design/nul-byte-persistence-fix.md).
+
+**Lone UTF-16 surrogates (U+D800–U+DFFF) hit the identical crash-and-terminate
+failure mode, via a sibling exception — reproduced, not fixed.** Same
+persistence boundary, same unresolved exposure until it is.
+
 ## Red-team operating boundary
 
 Any future Bastion.Strike component may attack only SampleBank Copilot, the
