@@ -19,10 +19,16 @@ CORPUS_ROOT = Path(__file__).resolve().parents[1] / "corpus"
 BENIGN_BANDS = frozenset(
     {"ordinary", "adjacent_vocabulary", "structurally_awkward", "redaction_span"}
 )
-# Corpora that carry a fixed band_manifest and get the same per-band
-# validation as benign.yaml. Band assignment for any file here must be fixed
-# at authoring time, same rule as benign.yaml itself.
-BANDED_CORPUS_FILENAMES = frozenset({"benign.yaml", "benign_tool_output.yaml"})
+# Per-file band sets. benign_tool_output.yaml additionally carries
+# mixed_script: genuine non-Latin/mixed-script content, the one
+# false-positive class benign.yaml (English-only) is structurally blind to.
+# Band assignment for any file here must be fixed at authoring time, same
+# rule as benign.yaml itself.
+CORPUS_BAND_SETS: dict[str, frozenset[str]] = {
+    "benign.yaml": BENIGN_BANDS,
+    "benign_tool_output.yaml": BENIGN_BANDS | frozenset({"mixed_script"}),
+}
+BANDED_CORPUS_FILENAMES = frozenset(CORPUS_BAND_SETS)
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
     raw_cases = raw.get("cases")
     if not isinstance(raw_cases, list):
         raise ValueError(f"{path}: cases must be a list")
+    expected_bands = CORPUS_BAND_SETS.get(path.name)
     cases: list[CorpusCase] = []
     seen_ids: set[str] = set()
     for raw_case in raw_cases:
@@ -74,7 +81,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
         if not isinstance(provenance, dict) or not provenance.get("author") or not provenance.get("authored"):
             raise ValueError(f"{path}: {case_id}: provenance needs author and authored")
         band = raw_case.get("band")
-        if path.name in BANDED_CORPUS_FILENAMES and band not in BENIGN_BANDS:
+        if expected_bands is not None and band not in expected_bands:
             raise ValueError(f"{path}: {case_id}: invalid benign band")
         override = raw_case.get("override")
         justification = override.get("justification") if isinstance(override, dict) else None
@@ -83,7 +90,7 @@ def load_corpus(path: Path) -> list[CorpusCase]:
         expected_redacted_content = raw_case.get("expected_redacted_content")
         if expected_redacted_content is not None and not isinstance(expected_redacted_content, str):
             raise ValueError(f"{path}: {case_id}: expected_redacted_content must be a string")
-        if path.name in BANDED_CORPUS_FILENAMES and band == "redaction_span":
+        if expected_bands is not None and band == "redaction_span":
             if raw_case.get("expect") == "redact" and expected_redacted_content is None:
                 raise ValueError(f"{path}: {case_id}: redact span case requires expected_redacted_content")
             if raw_case.get("expect") == "allow" and expected_redacted_content is not None:
@@ -101,14 +108,14 @@ def load_corpus(path: Path) -> list[CorpusCase]:
             )
         )
         seen_ids.add(case_id)
-    if path.name in BANDED_CORPUS_FILENAMES:
+    if expected_bands is not None:
         manifest = raw.get("band_manifest")
-        if not isinstance(manifest, dict) or set(manifest) != BENIGN_BANDS:
+        if not isinstance(manifest, dict) or set(manifest) != expected_bands:
             raise ValueError(f"{path}: benign corpus requires a complete band_manifest")
         if any(type(count) is not int or count < 0 for count in manifest.values()):
             raise ValueError(f"{path}: band_manifest counts must be non-negative integers")
         actual_counts = Counter(case.band for case in cases)
-        declared_counts = {band: manifest[band] for band in BENIGN_BANDS}
+        declared_counts = {band: manifest[band] for band in expected_bands}
         if actual_counts != declared_counts:
             raise ValueError(
                 f"{path}: band_manifest {declared_counts} != actual {dict(actual_counts)}"

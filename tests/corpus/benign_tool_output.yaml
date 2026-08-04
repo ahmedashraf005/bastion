@@ -4,6 +4,7 @@ band_manifest:
   adjacent_vocabulary: 8
   structurally_awkward: 8
   redaction_span: 9
+  mixed_script: 9
 cases:
   # Realistic tool-role content (JSON API responses, transaction records,
   # file contents, error strings, timestamps, IDs) with no PII/secrets.
@@ -236,3 +237,97 @@ cases:
     payload: '{"contact_phone": "+1-415-555-0148", "routing_number": "021000021"}'
     expected_redacted_content: '{"contact_phone": "[REDACTED]", "routing_number": "021000021"}'
     provenance: { author: Codex, authored: 2026-08-04, source: co-location check for ABA-routing suppression, note: "a genuine phone number and a routing number in the same document must not cross-contaminate — the phone still redacts, the routing number stays visible" }
+
+  # Genuine non-Latin and mixed-script content: Russian and Greek prose,
+  # names, addresses, and realistic JSON tool output with Cyrillic/Greek
+  # values. The false-positive class every other band in both benign
+  # corpora is structurally blind to, since they are English-only — this
+  # band specifically stresses two different mechanisms at once: Presidio's
+  # English-trained recognizers running over non-Latin text (LLM02), and
+  # SystemPromptLeakDetector's Cyrillic/Greek confusables skeleton mapping
+  # potentially skeletonizing enough of a payload to spuriously assemble the
+  # marker pattern (LLM07). Originated as the Step 3 mixed-script check in
+  # docs/design/confusables-marker-normalization.md; moved here from a
+  # one-off script so it has permanent, fixed-at-authoring-time regression
+  # coverage rather than being re-run by hand.
+  - id: mixed-script-russian-prose-news-001
+    band: mixed_script
+    expect: allow
+    payload: Центральный банк сообщил, что ключевая ставка останется без изменений до конца текущего квартала. Аналитики ожидали такого решения на фоне стабильной инфляции и умеренного роста экономики.
+    payload_codepoints: U+0426 U+0435 U+043D U+0442 U+0440 U+0430 U+043B U+044C U+043D U+044B U+0439 U+0431 U+0430 U+043D U+043A U+0441 U+043E U+043E U+0431 U+0449 U+0438 U+043B U+0447 U+0442 U+043E U+043A U+043B U+044E U+0447 U+0435 U+0432 U+0430 U+044F U+0441 U+0442 U+0430 U+0432 U+043A U+0430 U+043E U+0441 U+0442 U+0430 U+043D U+0435 U+0442 U+0441 U+044F U+0431 U+0435 U+0437 U+0438 U+0437 U+043C U+0435 U+043D U+0435 U+043D U+0438 U+0439 U+0434 U+043E U+043A U+043E U+043D U+0446 U+0430 U+0442 U+0435 U+043A U+0443 U+0449 U+0435 U+0433 U+043E U+043A U+0432 U+0430 U+0440 U+0442 U+0430 U+043B U+0430 U+0410 U+043D U+0430 U+043B U+0438 U+0442 U+0438 U+043A U+0438 U+043E U+0436 U+0438 U+0434 U+0430 U+043B U+0438 U+0442 U+0430 U+043A U+043E U+0433 U+043E U+0440 U+0435 U+0448 U+0435 U+043D U+0438 U+044F U+043D U+0430 U+0444 U+043E U+043D U+0435 U+0441 U+0442 U+0430 U+0431 U+0438 U+043B U+044C U+043D U+043E U+0439 U+0438 U+043D U+0444 U+043B U+044F U+0446 U+0438 U+0438 U+0438 U+0443 U+043C U+0435 U+0440 U+0435 U+043D U+043D U+043E U+0433 U+043E U+0440 U+043E U+0441 U+0442 U+0430 U+044D U+043A U+043E U+043D U+043E U+043C U+0438 U+043A U+0438
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: genuine Russian prose (news style). Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-russian-support-chat-001
+    band: mixed_script
+    expect: allow
+    payload: Здравствуйте! Меня зовут Екатерина, и я обращаюсь по поводу перевода средств на счёт моей матери, Марии Александровны Петровой, в другом банке. Прошу подсказать, сколько времени займёт операция.
+    payload_codepoints: U+0417 U+0434 U+0440 U+0430 U+0432 U+0441 U+0442 U+0432 U+0443 U+0439 U+0442 U+0435 U+041C U+0435 U+043D U+044F U+0437 U+043E U+0432 U+0443 U+0442 U+0415 U+043A U+0430 U+0442 U+0435 U+0440 U+0438 U+043D U+0430 U+0438 U+044F U+043E U+0431 U+0440 U+0430 U+0449 U+0430 U+044E U+0441 U+044C U+043F U+043E U+043F U+043E U+0432 U+043E U+0434 U+0443 U+043F U+0435 U+0440 U+0435 U+0432 U+043E U+0434 U+0430 U+0441 U+0440 U+0435 U+0434 U+0441 U+0442 U+0432 U+043D U+0430 U+0441 U+0447 U+0451 U+0442 U+043C U+043E U+0435 U+0439 U+043C U+0430 U+0442 U+0435 U+0440 U+0438 U+041C U+0430 U+0440 U+0438 U+0438 U+0410 U+043B U+0435 U+043A U+0441 U+0430 U+043D U+0434 U+0440 U+043E U+0432 U+043D U+044B U+041F U+0435 U+0442 U+0440 U+043E U+0432 U+043E U+0439 U+0432 U+0434 U+0440 U+0443 U+0433 U+043E U+043C U+0431 U+0430 U+043D U+043A U+0435 U+041F U+0440 U+043E U+0448 U+0443 U+043F U+043E U+0434 U+0441 U+043A U+0430 U+0437 U+0430 U+0442 U+044C U+0441 U+043A U+043E U+043B U+044C U+043A U+043E U+0432 U+0440 U+0435 U+043C U+0435 U+043D U+0438 U+0437 U+0430 U+0439 U+043C U+0451 U+0442 U+043E U+043F U+0435 U+0440 U+0430 U+0446 U+0438 U+044F
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: genuine Russian prose (support-chat style). Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-russian-name-address-001
+    band: mixed_script
+    expect: allow
+    payload: 'Клиент: Александр Сергеевич Смирнов. Адрес: город Москва, улица Тверская, дом 12, квартира 47. Телефон: +7 495 123-45-67.'
+    payload_codepoints: U+041A U+043B U+0438 U+0435 U+043D U+0442 U+0410 U+043B U+0435 U+043A U+0441 U+0430 U+043D U+0434 U+0440 U+0421 U+0435 U+0440 U+0433 U+0435 U+0435 U+0432 U+0438 U+0447 U+0421 U+043C U+0438 U+0440 U+043D U+043E U+0432 U+0410 U+0434 U+0440 U+0435 U+0441 U+0433 U+043E U+0440 U+043E U+0434 U+041C U+043E U+0441 U+043A U+0432 U+0430 U+0443 U+043B U+0438 U+0446 U+0430 U+0422 U+0432 U+0435 U+0440 U+0441 U+043A U+0430 U+044F U+0434 U+043E U+043C U+043A U+0432 U+0430 U+0440 U+0442 U+0438 U+0440 U+0430 U+0422 U+0435 U+043B U+0435 U+0444 U+043E U+043D
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: genuine Russian name and address, plus a Russian-formatted phone number. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-greek-prose-001
+    band: mixed_script
+    expect: allow
+    payload: Η Ευρωπαϊκή Κεντρική Τράπεζα ανακοίνωσε ότι τα επιτόκια θα παραμείνουν σταθερά. Οι αναλυτές περίμεναν αυτή την απόφαση λόγω της σταθερής πληθωρισμού και της μέτριας οικονομικής ανάπτυξης.
+    payload_codepoints: U+0397 U+0395 U+03C5 U+03C1 U+03C9 U+03C0 U+03B1 U+03CA U+03BA U+03AE U+039A U+03B5 U+03BD U+03C4 U+03C1 U+03B9 U+03BA U+03AE U+03A4 U+03C1 U+03AC U+03C0 U+03B5 U+03B6 U+03B1 U+03B1 U+03BD U+03B1 U+03BA U+03BF U+03AF U+03BD U+03C9 U+03C3 U+03B5 U+03CC U+03C4 U+03B9 U+03C4 U+03B1 U+03B5 U+03C0 U+03B9 U+03C4 U+03CC U+03BA U+03B9 U+03B1 U+03B8 U+03B1 U+03C0 U+03B1 U+03C1 U+03B1 U+03BC U+03B5 U+03AF U+03BD U+03BF U+03C5 U+03BD U+03C3 U+03C4 U+03B1 U+03B8 U+03B5 U+03C1 U+03AC U+039F U+03B9 U+03B1 U+03BD U+03B1 U+03BB U+03C5 U+03C4 U+03AD U+03C2 U+03C0 U+03B5 U+03C1 U+03AF U+03BC U+03B5 U+03BD U+03B1 U+03BD U+03B1 U+03C5 U+03C4 U+03AE U+03C4 U+03B7 U+03BD U+03B1 U+03C0 U+03CC U+03C6 U+03B1 U+03C3 U+03B7 U+03BB U+03CC U+03B3 U+03C9 U+03C4 U+03B7 U+03C2 U+03C3 U+03C4 U+03B1 U+03B8 U+03B5 U+03C1 U+03AE U+03C2 U+03C0 U+03BB U+03B7 U+03B8 U+03C9 U+03C1 U+03B9 U+03C3 U+03BC U+03BF U+03CD U+03BA U+03B1 U+03B9 U+03C4 U+03B7 U+03C2 U+03BC U+03AD U+03C4 U+03C1 U+03B9 U+03B1 U+03C2 U+03BF U+03B9 U+03BA U+03BF U+03BD U+03BF U+03BC U+03B9 U+03BA U+03AE U+03C2 U+03B1 U+03BD U+03AC U+03C0 U+03C4 U+03C5 U+03BE U+03B7 U+03C2
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: genuine Greek prose (news style). Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-greek-name-address-001
+    band: mixed_script
+    expect: allow
+    payload: 'Πελάτης: Δημήτριος Παπαδόπουλος. Διεύθυνση: Αθήνα, οδός Ερμού 25, Τηλέφωνο: +30 210 1234567.'
+    payload_codepoints: U+03A0 U+03B5 U+03BB U+03AC U+03C4 U+03B7 U+03C2 U+0394 U+03B7 U+03BC U+03AE U+03C4 U+03C1 U+03B9 U+03BF U+03C2 U+03A0 U+03B1 U+03C0 U+03B1 U+03B4 U+03CC U+03C0 U+03BF U+03C5 U+03BB U+03BF U+03C2 U+0394 U+03B9 U+03B5 U+03CD U+03B8 U+03C5 U+03BD U+03C3 U+03B7 U+0391 U+03B8 U+03AE U+03BD U+03B1 U+03BF U+03B4 U+03CC U+03C2 U+0395 U+03C1 U+03BC U+03BF U+03CD U+03A4 U+03B7 U+03BB U+03AD U+03C6 U+03C9 U+03BD U+03BF
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: genuine Greek name and address, plus a Greek-formatted phone number. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-json-cyrillic-customer-001
+    band: mixed_script
+    expect: allow
+    payload: '{"customer_name": "Смирнов Александр Сергеевич", "address": "Москва, ул. Тверская, д. 12, кв. 47", "account_status": "активен", "branch": "Центральное отделение"}'
+    payload_codepoints: U+0421 U+043C U+0438 U+0440 U+043D U+043E U+0432 U+0410 U+043B U+0435 U+043A U+0441 U+0430 U+043D U+0434 U+0440 U+0421 U+0435 U+0440 U+0433 U+0435 U+0435 U+0432 U+0438 U+0447 U+041C U+043E U+0441 U+043A U+0432 U+0430 U+0443 U+043B U+0422 U+0432 U+0435 U+0440 U+0441 U+043A U+0430 U+044F U+0434 U+043A U+0432 U+0430 U+043A U+0442 U+0438 U+0432 U+0435 U+043D U+0426 U+0435 U+043D U+0442 U+0440 U+0430 U+043B U+044C U+043D U+043E U+0435 U+043E U+0442 U+0434 U+0435 U+043B U+0435 U+043D U+0438 U+0435
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: realistic tool-output JSON with Cyrillic customer-record values. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-json-greek-customer-001
+    band: mixed_script
+    expect: allow
+    payload: '{"customer_name": "Παπαδόπουλος Δημήτριος", "address": "Αθήνα, οδός Ερμού 25", "account_status": "ενεργός", "branch": "Κεντρικό υποκατάστημα"}'
+    payload_codepoints: U+03A0 U+03B1 U+03C0 U+03B1 U+03B4 U+03CC U+03C0 U+03BF U+03C5 U+03BB U+03BF U+03C2 U+0394 U+03B7 U+03BC U+03AE U+03C4 U+03C1 U+03B9 U+03BF U+03C2 U+0391 U+03B8 U+03AE U+03BD U+03B1 U+03BF U+03B4 U+03CC U+03C2 U+0395 U+03C1 U+03BC U+03BF U+03CD U+03B5 U+03BD U+03B5 U+03C1 U+03B3 U+03CC U+03C2 U+039A U+03B5 U+03BD U+03C4 U+03C1 U+03B9 U+03BA U+03CC U+03C5 U+03C0 U+03BF U+03BA U+03B1 U+03C4 U+03AC U+03C3 U+03C4 U+03B7 U+03BC U+03B1
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: realistic tool-output JSON with Greek customer-record values. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-transaction-log-001
+    band: mixed_script
+    expect: allow
+    payload: '{"transactions": [{"id": "TXN-9F4A77C2", "merchant": "Пятёрочка", "amount": "-1250.00", "currency": "RUB"}, {"id": "TXN-72M4QX90", "merchant": "Coffee Ελλάδα", "amount": "-8.50", "currency": "EUR"}]}'
+    payload_codepoints: U+041F U+044F U+0442 U+0451 U+0440 U+043E U+0447 U+043A U+0430 U+0395 U+03BB U+03BB U+03AC U+03B4 U+03B1
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: mixed Cyrillic and Greek merchant names in one transaction log. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'
+  - id: mixed-script-cyrillic-dense-vocabulary-001
+    band: mixed_script
+    expect: allow
+    payload: Автомобиль, магазин, самолёт, солнце, машина, работа, сосед, космос, окно, метро, ресторан, аэропорт, компьютер, оператор, менеджер, документ, контракт, карта, номер, адрес, город, страна.
+    payload_codepoints: U+0410 U+0432 U+0442 U+043E U+043C U+043E U+0431 U+0438 U+043B U+044C U+043C U+0430 U+0433 U+0430 U+0437 U+0438 U+043D U+0441 U+0430 U+043C U+043E U+043B U+0451 U+0442 U+0441 U+043E U+043B U+043D U+0446 U+0435 U+043C U+0430 U+0448 U+0438 U+043D U+0430 U+0440 U+0430 U+0431 U+043E U+0442 U+0430 U+0441 U+043E U+0441 U+0435 U+0434 U+043A U+043E U+0441 U+043C U+043E U+0441 U+043E U+043A U+043D U+043E U+043C U+0435 U+0442 U+0440 U+043E U+0440 U+0435 U+0441 U+0442 U+043E U+0440 U+0430 U+043D U+0430 U+044D U+0440 U+043E U+043F U+043E U+0440 U+0442 U+043A U+043E U+043C U+043F U+044C U+044E U+0442 U+0435 U+0440 U+043E U+043F U+0435 U+0440 U+0430 U+0442 U+043E U+0440 U+043C U+0435 U+043D U+0435 U+0434 U+0436 U+0435 U+0440 U+0434 U+043E U+043A U+0443 U+043C U+0435 U+043D U+0442 U+043A U+043E U+043D U+0442 U+0440 U+0430 U+043A U+0442 U+043A U+0430 U+0440 U+0442 U+0430 U+043D U+043E U+043C U+0435 U+0440 U+0430 U+0434 U+0440 U+0435 U+0441 U+0433 U+043E U+0440 U+043E U+0434 U+0441 U+0442 U+0440 U+0430 U+043D U+0430
+    provenance:
+      author: Codex
+      authored: '2026-08-04'
+      source: 'mixed-script false-positive check: dense list of common Russian words, chosen to maximize frequency of exactly the confusable letters in SystemPromptLeakDetector''s Cyrillic/Greek skeleton table. Verified clean against both real Presidio (LLM02) and the confusables-active SystemPromptLeakDetector (LLM07) at authoring time.'

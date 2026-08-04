@@ -338,32 +338,14 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
 
         asyncio.run(exercise())
 
-    def test_confusables_does_not_false_positive_on_genuine_cyrillic_prose(self) -> None:
-        """The benign corpora are English-only and structurally cannot catch
-        a confusables map mangling legitimate non-Latin text into something
-        that spuriously matches. Direct regression guard for that class."""
-
-        detector = SystemPromptLeakDetector.from_definitions(
-            [_marker_pattern()],
-            [_nfkc_and_confusables_promoted_normalization()],
-            marker_resolver={MARKER_REF: MARKER}.__getitem__,
-        )
-
-        async def exercise() -> None:
-            genuine_content = (
-                "Центральный банк сообщил, что ключевая ставка останется без "
-                "изменений до конца текущего квартала.",
-                '{"customer_name": "Смирнов Александр Сергеевич", '
-                '"address": "Москва, ул. Тверская, д. 12, кв. 47"}',
-                "Η Ευρωπαϊκή Κεντρική Τράπεζα ανακοίνωσε ότι τα επιτόκια θα "
-                "παραμείνουν σταθερά.",
-            )
-            for content in genuine_content:
-                signal = await detector.scan(content)
-                with self.subTest(content=content[:30]):
-                    self.assertFalse(signal.matched)
-
-        asyncio.run(exercise())
+    # A dedicated one-off mixed-script check used to live here (3 constructed
+    # Russian/Greek strings). It is superseded by
+    # tests/corpus/benign_tool_output.yaml's mixed_script band (9 cases,
+    # fixed band assignment) and
+    # test_tool_output_benign_corpus.ToolOutputBenignCorpusTests.test_mixed_script_band_does_not_false_positive_on_llm07_confusables,
+    # which checks the same false-positive class against the real, live
+    # normalization_versions.yaml rather than a fixture — a stronger
+    # guarantee than this file's synthetic detector construction gives.
 
     def test_only_one_active_marker_unicode_form_is_supported_today(self) -> None:
         # Documents current behavior: a single Literal["NFKC"] means only one
