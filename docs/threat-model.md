@@ -166,6 +166,23 @@ the first choice. Content in additional choices is unscanned. Multi-choice
 output inspection is a separate detection decision and is not implemented
 here.
 
+Prompt Guard's own user-message selection (`gate/app/main.py:759-765`)
+filters on `isinstance(message.get("content"), str)` (line 764), silently
+excluding any user-role message that uses the standard OpenAI multi-part
+content-block shape instead of a plain string — no error, no log. If every
+user turn in a request uses that shape, the filtered join produces `""` and
+Prompt Guard scores an empty string against a real request. This is a
+silent LLM01 coverage hole in shipped behavior, not a hypothetical. The
+Presidio paths do not have this gap: `most_recent_user_message`
+(`gate/app/main.py:205-222`) selects the latest user message by role alone,
+with no content-type check, and `extract_text_content`
+(`gate/app/main.py:243-271`) handles both the plain-string and
+content-block-array shapes once a message is selected. `main.py:208-212`'s
+own docstring records that the string-only restriction was deliberately
+removed from that exact path for this exact reason — so this is a
+known-pattern regression surviving in the one place it wasn't yet fixed,
+not an unknown failure mode.
+
 ### Input-stage block response shape
 
 Gate's input-stage block (`block-high-confidence-injection`, LLM01) returns
