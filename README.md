@@ -97,18 +97,29 @@ GPT-4o numbers — no hosted inference is used anywhere in this project. Full
 method, reproduction steps, and the 45-second-timeout finding on
 qwen2.5:7b: [`docs/benchmarks/agentdojo.md`](docs/benchmarks/agentdojo.md).
 
-**Bypass corpus**: 33 of 35 saved evasion payloads matched by Gate's live
-detector configuration; 2 individually pinned with recorded reasons — a
+**Bypass corpus**: 34 of 35 saved evasion payloads matched by Gate's live
+detector configuration; 1 individually pinned with a recorded reason — a
 window-size limitation (a k=8 zero-width-space density payload spans 199
-source characters against the detector's 160-character window) and Cyrillic/
-Greek visual-confusable substitution (needs a UTS #39 confusables map,
-separate work; NFKC normalization, which closed 4 other formerly-pinned
-cases, provably does not touch either payload).
+source characters against the detector's 160-character window; U+200B has
+no compatibility decomposition or confusable skeleton, so neither NFKC nor
+confusables normalization can affect it). The Cyrillic/Greek
+visual-confusable case that was pinned for the same reason is now closed —
+see [`docs/design/confusables-marker-normalization.md`](docs/design/confusables-marker-normalization.md).
 
 **Benign corpus**: 48 hand-authored cases across four bands — 20 ordinary,
 10 adjacent-vocabulary, 12 structurally-awkward, 6 redaction-span — currently
 zero false positives. Reported as corpus composition and count, not a rate:
 0/48 has a wide confidence interval at this sample size.
+
+**Benign tool-output corpus**: 46 hand-authored cases across five bands —
+12 ordinary, 8 adjacent-vocabulary, 8 structurally-awkward, 9
+redaction-span, 9 mixed-script — currently zero false positives. The
+mixed-script band (genuine Russian and Greek prose, names, addresses, and
+JSON tool output with Cyrillic/Greek values) is checked against both
+mechanisms it exists to stress: real Presidio (LLM02, input-stage) and real
+LLM07 marker detection with confusables normalization active, against the
+live policy configuration. Reported as corpus composition and count, not a
+rate: 0/46 has a wide confidence interval at this sample size.
 
 **Live campaign evidence**: 45 adversarial queries across 3 campaigns
 against Gate's hardened default profile, zero confirmed bypasses, evidence
@@ -130,10 +141,10 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
   `GATE_SCAN_TOOL_OUTPUT` (opt-in, default off) runs Presidio over the
   latest tool-role message and redacts matches, closing part of the LLM02
   gap above — it adds no LLM01/injection coverage. Measured against a
-  37-case, four-band benign tool-output corpus
+  46-case, five-band benign tool-output corpus
   (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
-  adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span): zero
-  mismatches. A bank routing number was initially misclassified as a phone
+  adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span, 9
+  mixed-script): zero mismatches. A bank routing number was initially misclassified as a phone
   number (PhoneRecognizer's context list includes the generic word
   "number") and has since been fixed with a checksum-validated ABA
   routing-number recognizer used only to suppress that collision. **This

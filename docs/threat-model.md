@@ -66,10 +66,14 @@ egress only — it provides no LLM01/injection coverage, redacts rather than
 blocks (a tool-role message a client receives as malformed or as a 400 is
 indistinguishable from a transport failure to a standard agent loop), and is
 opt-in because Presidio's false-positive behavior on structured tool content
-was unmeasured before it was. Measured against a 37-case, four-band benign
+was unmeasured before it was. Measured against a 46-case, five-band benign
 tool-output corpus (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
-adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span cases) with the
-real Presidio detector: zero mismatches.
+adjacent-vocabulary, 8 structurally-awkward, 9 redaction-span, 9
+mixed-script cases) with the real Presidio detector: zero mismatches. The
+mixed-script band is also checked against real LLM07 marker detection with
+confusables normalization active (see
+[`docs/design/confusables-marker-normalization.md`](design/confusables-marker-normalization.md)) —
+zero mismatches there too.
 
 A bank routing number was initially misclassified as PHONE_NUMBER and
 redacted despite not being PII (measured: `span-account-routing-001`). Root
