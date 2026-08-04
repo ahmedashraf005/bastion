@@ -60,6 +60,11 @@ class PromotedNormalization(BaseModel):
     # fields above, this never reaches _should_strip, so it cannot affect
     # the literal/regex strip_separators path.
     marker_unicode_form: Literal["NFKC"] | None = None
+    # Same marker_ref-only scope as marker_unicode_form, and never reaches
+    # _should_strip. Applies SystemPromptLeakDetector._MARKER_CONFUSABLES_SKELETON
+    # (Cyrillic/Greek -> Latin ASCII) after marker_unicode_form, not instead
+    # of it — see SystemPromptLeakDetector.scan() for why the order matters.
+    marker_confusables_skeleton: bool = False
 
 
 class DetectorPatternVersion(BaseModel):
@@ -179,6 +184,9 @@ class SystemPromptLeakDetector:
                 f"conflicting active marker_unicode_form values: {sorted(marker_forms)}"
             )
         self._marker_unicode_form: str | None = next(iter(marker_forms), None)
+        self._marker_confusables_skeleton: bool = any(
+            item.marker_confusables_skeleton for item in active
+        )
 
     @classmethod
     def from_yaml(
@@ -350,6 +358,60 @@ class SystemPromptLeakDetector:
                 index_map.append(original_index)
         return "".join(normalized_characters), index_map
 
+    # Hand-authored, not vendored or dependency-supplied. Derived by filtering
+    # Unicode's confusables.txt (UTS #39 "Unicode Security Mechanisms",
+    # version 17.0.0, 2025-07-22 snapshot,
+    # https://www.unicode.org/Public/security/latest/confusables.txt) to
+    # entries where the source codepoint is in the Greek (U+0370-U+03FF) or
+    # Cyrillic (U+0400-U+04FF) block and the target is exactly one Basic
+    # Latin letter (A-Z or a-z) — i.e. a single-character confusable
+    # skeleton, not the file's other entries covering different scripts,
+    # digit look-alikes, or multi-character expansions. One direction only:
+    # confusable -> Latin ASCII skeleton, never the reverse. 70 entries;
+    # every one traceable back to that source file by codepoint. Deliberately
+    # excludes digit-shaped confusables (e.g. Cyrillic З ~ "3") since the
+    # target residual and this table's stated scope are about letters, not
+    # digits — the marker's digits are already plain ASCII in every corpus
+    # payload seen so far.
+    _MARKER_CONFUSABLES_SKELETON: dict[str, str] = {
+        "ͺ": "i", "Ϳ": "J", "Α": "A", "Β": "B", "Ε": "E",
+        "Ζ": "Z", "Η": "H", "Ι": "l", "Κ": "K", "Μ": "M",
+        "Ν": "N", "Ο": "O", "Ρ": "P", "Τ": "T", "Υ": "Y",
+        "Χ": "X", "α": "a", "γ": "y", "ι": "i", "ν": "v",
+        "ο": "o", "ρ": "p", "σ": "o", "υ": "u", "ϒ": "Y",
+        "Ϝ": "F", "ϭ": "o", "ϱ": "p", "ϲ": "c", "ϳ": "j",
+        "ϸ": "p", "Ϲ": "C", "Ϻ": "M", "Ѕ": "S", "І": "l",
+        "Ј": "J", "А": "A", "В": "B", "Е": "E", "К": "K",
+        "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C",
+        "Т": "T", "У": "Y", "Х": "X", "Ь": "b", "а": "a",
+        "г": "r", "е": "e", "о": "o", "р": "p", "с": "c",
+        "у": "y", "х": "x", "ш": "w", "ѕ": "s", "і": "i",
+        "ј": "j", "ѡ": "w", "Ѵ": "V", "ѵ": "v", "Ү": "Y",
+        "ү": "y", "һ": "h", "ҽ": "e", "Ӏ": "l", "ӏ": "l",
+    }
+
+    @classmethod
+    def _confusables_normalize_with_index_map(cls, content: str) -> tuple[str, list[int]]:
+        """Map Cyrillic/Greek confusables to their Latin ASCII skeleton.
+
+        Always exactly one output character per input character (a plain
+        lookup-or-identity substitution, not a decomposition), so unlike
+        _form_normalize_with_index_map this can never change a matched
+        span's length relative to the text it receives — the index map is
+        the identity map. Kept as an explicit per-character map (rather than
+        str.translate) to match this file's existing normalization-step
+        shape and stay trivially composable with it in scan().
+        """
+
+        normalized_characters: list[str] = []
+        index_map: list[int] = []
+        for original_index, character in enumerate(content):
+            normalized_characters.append(
+                cls._MARKER_CONFUSABLES_SKELETON.get(character, character)
+            )
+            index_map.append(original_index)
+        return "".join(normalized_characters), index_map
+
     @staticmethod
     def _marker_char_equal(character: str, expected: str) -> bool:
         """Compare ASCII marker letters without Unicode case-folding."""
@@ -426,15 +488,41 @@ class SystemPromptLeakDetector:
         for pattern in self._patterns:
             if pattern.definition.pattern_type == "marker_ref":
                 assert pattern.marker is not None
-                if self._marker_unicode_form is None:
+                if self._marker_unicode_form is None and not self._marker_confusables_skeleton:
                     pattern_spans = self._marker_ref_spans(content, pattern.marker)
                 else:
                     if marker_normalized_content is None or marker_index_map is None:
-                        marker_normalized_content, marker_index_map = (
-                            self._form_normalize_with_index_map(
-                                content, self._marker_unicode_form
+                        marker_normalized_content = content
+                        marker_index_map = list(range(len(content)))
+                        # NFKC before confusables, not the reverse: some
+                        # compatibility forms (e.g. mathematical bold Greek
+                        # letters) NFKC-decompose into a plain Greek/Cyrillic
+                        # letter, which only the confusables step then maps
+                        # to Latin ASCII. Running confusables first would
+                        # miss that chain, since those compatibility-form
+                        # codepoints are outside the confusables table's
+                        # Greek/Cyrillic-block-only domain. Verified with a
+                        # constructed case (MATHEMATICAL BOLD CAPITAL ALPHA,
+                        # U+1D6A8): this order resolves it to "A"; the
+                        # reverse order leaves it as Greek "Α", non-ASCII.
+                        if self._marker_unicode_form is not None:
+                            marker_normalized_content, step_index_map = (
+                                self._form_normalize_with_index_map(
+                                    marker_normalized_content, self._marker_unicode_form
+                                )
                             )
-                        )
+                            marker_index_map = [
+                                marker_index_map[index] for index in step_index_map
+                            ]
+                        if self._marker_confusables_skeleton:
+                            marker_normalized_content, step_index_map = (
+                                self._confusables_normalize_with_index_map(
+                                    marker_normalized_content
+                                )
+                            )
+                            marker_index_map = [
+                                marker_index_map[index] for index in step_index_map
+                            ]
                     raw_spans = self._marker_ref_spans(marker_normalized_content, pattern.marker)
                     pattern_spans = [
                         (marker_index_map[start], marker_index_map[end - 1] + 1)

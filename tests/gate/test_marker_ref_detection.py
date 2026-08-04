@@ -46,6 +46,24 @@ def _marker_pattern() -> LeakPattern:
     )
 
 
+def _nfkc_and_confusables_promoted_normalization(
+    *, active: bool = True
+) -> PromotedNormalization:
+    # Mirrors the real proposed manifest entry: carries marker_unicode_form
+    # forward alongside the new field, since the two compose (NFKC first,
+    # then confusables) rather than replace one another.
+    return PromotedNormalization(
+        version_id="test-normalization-confusables",
+        proposal_id="test-proposal-confusables",
+        origin_finding_id="test-fixture",
+        detector="system_prompt_leak",
+        active=active,
+        operation="add",
+        marker_unicode_form="NFKC",
+        marker_confusables_skeleton=True,
+    )
+
+
 def _nfkc_promoted_normalization(*, active: bool = True) -> PromotedNormalization:
     return PromotedNormalization(
         version_id="test-normalization-nfkc",
@@ -208,6 +226,142 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
                 with self.subTest(case_id=case_id):
                     self.assertTrue(signal.matched, case_id)
                     self.assertEqual(signal.redacted_content, "[REDACTED]")
+
+        asyncio.run(exercise())
+
+    def test_confusables_inactive_by_default_the_target_still_fails(self) -> None:
+        """Regression guard: this feature is opt-in, not on by default."""
+
+        async def exercise() -> None:
+            signal = await self.detector.scan(
+                self.bypasses["llm07-homoglyph-cyrillic-greek-confusables-001"]["payload"]
+            )
+            self.assertFalse(signal.matched)
+
+        asyncio.run(exercise())
+
+    def test_confusables_active_closes_the_target_residual(self) -> None:
+        detector = SystemPromptLeakDetector.from_definitions(
+            [_marker_pattern()],
+            [_nfkc_and_confusables_promoted_normalization()],
+            marker_resolver={MARKER_REF: MARKER}.__getitem__,
+        )
+
+        async def exercise() -> None:
+            signal = await detector.scan(
+                self.bypasses["llm07-homoglyph-cyrillic-greek-confusables-001"]["payload"]
+            )
+            self.assertTrue(signal.matched)
+            self.assertEqual(signal.redacted_content, "[REDACTED]")
+
+            # The other out-of-scope pinned case (window-size limitation,
+            # not a normalization gap) must remain unaffected.
+            k8_signal = await detector.scan(
+                self.bypasses["llm07-cf-zero-width-space-density-k8-001"]["payload"]
+            )
+            self.assertFalse(k8_signal.matched)
+
+        asyncio.run(exercise())
+
+    def test_confusables_redaction_span_is_byte_exact_against_raw_content(self) -> None:
+        detector = SystemPromptLeakDetector.from_definitions(
+            [_marker_pattern()],
+            [_nfkc_and_confusables_promoted_normalization()],
+            marker_resolver={MARKER_REF: MARKER}.__getitem__,
+        )
+
+        async def exercise() -> None:
+            payload = (
+                "Case review: "
+                + self.bypasses["llm07-homoglyph-cyrillic-greek-confusables-001"]["payload"]
+                + ". Keep this: TXN-9F4A77C2 visible."
+            )
+            signal = await detector.scan(payload)
+            self.assertTrue(signal.matched)
+            # Surrounding raw text must survive untouched; no confusables-
+            # mapped Latin ASCII should leak in outside the redacted span.
+            self.assertEqual(
+                signal.redacted_content,
+                "Case review: [REDACTED]. Keep this: TXN-9F4A77C2 visible.",
+            )
+
+        asyncio.run(exercise())
+
+    def test_confusables_active_still_redacts_the_pre_existing_control_cases(self) -> None:
+        """The new capability must not regress cases that already passed,
+        including the four NFKC target residuals it composes with."""
+
+        detector = SystemPromptLeakDetector.from_definitions(
+            [_marker_pattern()],
+            [_nfkc_and_confusables_promoted_normalization()],
+            marker_resolver={MARKER_REF: MARKER}.__getitem__,
+        )
+
+        async def exercise() -> None:
+            for case_id in (
+                "llm07-cf-zero-width-space-density-k6-001",
+                "llm07-clean-marker-control-001",
+                "llm07-mn-combining-acute-001",
+                *NFKC_TARGET_CASES,
+            ):
+                signal = await detector.scan(self.bypasses[case_id]["payload"])
+                with self.subTest(case_id=case_id):
+                    self.assertTrue(signal.matched, case_id)
+                    self.assertEqual(signal.redacted_content, "[REDACTED]")
+
+        asyncio.run(exercise())
+
+    def test_confusables_order_must_run_after_nfkc_not_before(self) -> None:
+        """Some compatibility forms (mathematical bold/italic/script Greek
+        and Cyrillic letters) NFKC-decompose into a PLAIN Greek/Cyrillic
+        letter rather than directly into Latin ASCII. Only running
+        confusables AFTER NFKC catches that chain, since compatibility-form
+        codepoints like U+1D6A8 are outside the confusables table's
+        Greek/Cyrillic-block-only domain."""
+
+        detector = SystemPromptLeakDetector.from_definitions(
+            [_marker_pattern()],
+            [_nfkc_and_confusables_promoted_normalization()],
+            marker_resolver={MARKER_REF: MARKER}.__getitem__,
+        )
+
+        async def exercise() -> None:
+            # U+1D6A8 MATHEMATICAL BOLD CAPITAL ALPHA in place of the
+            # marker's leading "B" is the wrong letter on purpose here; this
+            # test only needs one compatibility-form Greek/Cyrillic
+            # character present anywhere the scan will pass over, to prove
+            # composition order resolves it to ASCII rather than leaving a
+            # non-ASCII Greek letter behind mid-scan.
+            payload = "\U0001D6A8" + "BASTION-CANARY-7K2M9QX4"
+            signal = await detector.scan(payload)
+            self.assertTrue(signal.matched)
+
+        asyncio.run(exercise())
+
+    def test_confusables_does_not_false_positive_on_genuine_cyrillic_prose(self) -> None:
+        """The benign corpora are English-only and structurally cannot catch
+        a confusables map mangling legitimate non-Latin text into something
+        that spuriously matches. Direct regression guard for that class."""
+
+        detector = SystemPromptLeakDetector.from_definitions(
+            [_marker_pattern()],
+            [_nfkc_and_confusables_promoted_normalization()],
+            marker_resolver={MARKER_REF: MARKER}.__getitem__,
+        )
+
+        async def exercise() -> None:
+            genuine_content = (
+                "Центральный банк сообщил, что ключевая ставка останется без "
+                "изменений до конца текущего квартала.",
+                '{"customer_name": "Смирнов Александр Сергеевич", '
+                '"address": "Москва, ул. Тверская, д. 12, кв. 47"}',
+                "Η Ευρωπαϊκή Κεντρική Τράπεζα ανακοίνωσε ότι τα επιτόκια θα "
+                "παραμείνουν σταθερά.",
+            )
+            for content in genuine_content:
+                signal = await detector.scan(content)
+                with self.subTest(content=content[:30]):
+                    self.assertFalse(signal.matched)
 
         asyncio.run(exercise())
 

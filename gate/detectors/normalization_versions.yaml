@@ -19,13 +19,18 @@
   named_classes: []
   codepoints: []
 
-# Signed off. Promoted after: Step 1 hypothesis verification, Step 2
-# pipeline-placement rationale, Step 3 corpus measurement (bypass 29+6 ->
-# 33+2, benign 0/48 unchanged with zero verdict changes), Step 4 blast-radius
-# audit, and the max_source_span margin check (closest currently-passing
-# case unaffected by NFKC; only these four cases' span changes at all). See
-# docs/design/nfkc-marker-normalization.md for the full record. A live
-# branching-campaign confirmation follows this promotion.
+# Deactivated 2026-08-04, NOT removed, superseded by
+# normalization-87f46a8c-0651-4588-bd75-a54dd702ddcb below (which carries
+# marker_unicode_form: NFKC forward unchanged, plus the new
+# marker_confusables_skeleton field). Gate enforces exactly one active entry
+# per manifest, so promoting the successor required deactivating this one —
+# same mechanism as the e40488d4 -> b7b3cad1 transition above. Promoted
+# after: Step 1 hypothesis verification, Step 2 pipeline-placement
+# rationale, Step 3 corpus measurement (bypass 29+6 -> 33+2, benign 0/48
+# unchanged with zero verdict changes), Step 4 blast-radius audit, and the
+# max_source_span margin check (closest currently-passing case unaffected by
+# NFKC; only these four cases' span changes at all). See
+# docs/design/nfkc-marker-normalization.md for the full record.
 #
 # origin_finding_id deviates from this manifest's normal convention (a real
 # strike.findings UUID reached via normalization_proposals and
@@ -37,9 +42,38 @@
   proposal_id: b7b3cad1-fb2f-4d03-8338-7bd01762eb23
   origin_finding_id: bypass-corpus:llm07-homoglyph-fullwidth-001,llm07-homoglyph-mathematical-bold-001,llm07-homoglyph-circled-001,llm07-homoglyph-parenthesized-001
   detector: system_prompt_leak
+  active: false
+  operation: add
+  unicode_categories: []
+  named_classes: []
+  codepoints: []
+  marker_unicode_form: NFKC
+
+# Signed off. Promoted after: Step 1 mapping-source decision (hand-authored
+# 70-entry Greek/Cyrillic -> Latin-ASCII skeleton table, derived from
+# Unicode's confusables.txt UTS #39 v17.0.0), Step 2 placement/ordering
+# rationale (confusables must run after NFKC, not before — verified with a
+# constructed mathematical-bold-Greek-alpha case), Step 3 corpus measurement
+# (bypass 33+2 -> 34+1, both benign corpora unchanged) plus a nine-case
+# mixed-script false-positive check (genuine Russian/Greek prose, names,
+# addresses, JSON tool output — zero false positives), Step 4 blast-radius
+# audit. Carries marker_unicode_form: NFKC forward unchanged (supersedes
+# normalization-b7b3cad1, does not stack with it) plus the new
+# marker_confusables_skeleton field. See
+# docs/design/confusables-marker-normalization.md for the full record.
+#
+# origin_finding_id follows the same non-standard convention as
+# normalization-b7b3cad1 for the same reason: no live Strike finding backs
+# this proposal — it closes one evidence-verified static bypass-corpus
+# residual (mechanical_live_gate_test provenance), not a campaign finding.
+- version_id: normalization-87f46a8c-0651-4588-bd75-a54dd702ddcb
+  proposal_id: 87f46a8c-0651-4588-bd75-a54dd702ddcb
+  origin_finding_id: bypass-corpus:llm07-homoglyph-cyrillic-greek-confusables-001
+  detector: system_prompt_leak
   active: true
   operation: add
   unicode_categories: []
   named_classes: []
   codepoints: []
   marker_unicode_form: NFKC
+  marker_confusables_skeleton: true

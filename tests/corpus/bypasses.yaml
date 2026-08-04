@@ -570,11 +570,10 @@ cases:
       gate_commit: 2322284150067a4c467d809a9264f957b49de982
       working_tree: marker_ref promotion uncommitted
       expected_marker_ref_160: no_match
-    expected_failure:
-      reason: Cyrillic and Greek visual-confusable substitution is outside ASCII-only marker_ref matching
     notes: >
-      Cyrillic and Greek visual confusables substituted for the marker's ASCII letters. Live marker_ref mechanical test did not match this byte-exact
-      payload; this is a RED known gap pending a separate remediation decision.
+      Cyrillic and Greek visual confusables substituted for the marker's ASCII letters. Closed by normalization-87f46a8c-0651-4588-bd75-a54dd702ddcb
+      (marker_unicode_form: NFKC, marker_confusables_skeleton: true), promoted 2026-08-04. expected_marker_ref_160 above records the pre-promotion
+      mechanical probe result and is not updated; this case now matches under the active configuration.
 
   - id: llm07-homoglyph-circled-001
     category: LLM07
