@@ -166,6 +166,40 @@ the first choice. Content in additional choices is unscanned. Multi-choice
 output inspection is a separate detection decision and is not implemented
 here.
 
+### Input-stage block response shape
+
+Gate's input-stage block (`block-high-confidence-injection`, LLM01) returns
+HTTP 400 with a non-OpenAI body: `{"error": "...", "rule_id": "..."}`.
+Standard OpenAI SDK clients map this to `BadRequestError` by status code
+alone, but because the body's `"error"` value is a string rather than a
+mapping, the SDK leaves `e.code` and `e.param` unset. A client that inspects
+those fields to distinguish recoverable errors from genuine failures cannot
+identify a policy block that way — a block is indistinguishable from a
+malformed request. Traced concretely, not assumed: AgentDojo's benchmark
+harness (`agentdojo/benchmark.py`) excludes `BadRequestError` from retry, and
+its one recovery path checks `e.code`/`e.param` against known values (e.g.
+`context_length_exceeded`); neither is set, so it re-raises and the benchmark
+crashes rather than degrading gracefully. This affects the existing LLM01
+block path in shipped behavior today — it is not a hypothetical
+future-blocking concern.
+
+### Tool-output injection: resolved design note (detection not yet built)
+
+Rejecting tool content does not require a rejection response. A tool-role
+message is part of the request Gate forwards upstream, not the model's
+response, so Gate can substitute placeholder content for a detected
+injection and return an ordinary HTTP 200 — the agent client sees nothing
+unusual at the protocol level, unlike the block path above. This is the same
+mechanism already used for tool-output PII redaction (`GATE_SCAN_TOOL_OUTPUT`).
+`finish_reason: content_filter` and `message.refusal` are output-shape
+concepts (they describe the assistant's own response) and do not apply here.
+
+What remains open is the detector, not the response mechanism: Prompt Guard
+2's model card scopes it to prompts attempting to override instructions, with
+no guidance on tool output, so running it over tool content is off-label with
+unmeasured behavior. A labelled tool-output injection corpus is required
+before any detector is wired to that path — this has not been built.
+
 ### Evidence persistence integrity
 
 Postgres cannot store an embedded NUL byte (U+0000) in any text or JSONB
