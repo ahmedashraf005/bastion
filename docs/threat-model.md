@@ -80,13 +80,31 @@ PHONE_NUMBER, CREDIT_CARD, US_SSN only — no financial-identifier recognizer):
   is not PII (measured: `span-account-routing-001`). IBANs and plain account
   numbers were not misclassified in this corpus, but that is an absence of a
   recognizer, not a verified absence of risk.
-- SSNs in the JSON field shape that dominates real tool output
-  (`{"ssn": "078-05-1120"}`) are not detected at all — the US_SSN recognizer
-  as configured requires prose context. This is a false negative in the
-  feature's primary use case, not just an edge case. Even when an SSN is
-  detected via spelled-out prose context, it is labelled PHONE_NUMBER rather
-  than US_SSN, so `entities` in `detector_signals` cannot be relied on for
-  grouping or reporting by entity type.
+- **Corrected 2026-08-04 — the claim below was false as written and shipped
+  in this document.** It previously said SSNs in JSON field form
+  (`{"ssn": "078-05-1120"}`) are not detected and that US_SSN requires prose
+  context. Both are wrong. The value `078-05-1120` is one of three canonical
+  placeholder SSNs (`123456789`, `987654320`, `078051120`) that
+  presidio-analyzer's `UsSsnRecognizer.invalidate_result()` deliberately
+  blacklists, since they are widely-reused textbook/example values rather
+  than real SSNs — the corpus case happened to use exactly one of them.
+  With a non-blacklisted value (`234-56-7890`), US_SSN is correctly detected
+  in bare (score 0.500), prose (0.850), and JSON field (0.850) form alike:
+  the surrounding JSON key text is read as recognizer context the same way
+  prose is, so there is no JSON-specific gap. Anyone authoring PII test data
+  against Presidio should know about this blacklist — an example/placeholder
+  SSN used as "real" test PII will silently and by design not fire.
+- A narrower entity-type finding survives, and is unrelated to the blacklist
+  above: a digit sequence shaped like `078-05-11xx` (the same family as the
+  blacklisted value) independently registers as PHONE_NUMBER-plausible to
+  Presidio's phone recognizer, and can surface as PHONE_NUMBER instead of or
+  alongside US_SSN when the generic context word "number" appears nearby
+  (see the routing-number entry below for the shared root cause). This is a
+  coincidence of specific digit shapes, not a general property of SSN
+  detection — the corrected corpus case (`234-56-7890`) does not reproduce
+  it, and `entities` correctly reports only `US_SSN` for it. Entity types in
+  `detector_signals` are reliable for grouping in the general case measured
+  here; they are not guaranteed reliable for every possible digit sequence.
 
 Redaction is a literal string splice: Presidio's matched span excludes the
 surrounding quote characters and the replacement text `[REDACTED]` contains

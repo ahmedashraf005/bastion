@@ -132,14 +132,14 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
   gap above — it adds no LLM01/injection coverage. Measured against a
   36-case, four-band benign tool-output corpus
   (`tests/corpus/benign_tool_output.yaml`: 12 ordinary, 8
-  adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span), one
-  redaction-span case false-positived: a bank routing number, misread as a
-  phone number, because Presidio has no financial-identifier recognizer.
-  The same gap causes a false negative in the feature's main use case: an
-  SSN in JSON field form (`{"ssn": "078-05-1120"}`) is not detected at all —
-  the recognizer needs prose context. Full account, including a
-  JSON-validity check on the redaction itself, in
-  [`docs/threat-model.md`](docs/threat-model.md).
+  adjacent-vocabulary, 8 structurally-awkward, 8 redaction-span). **This
+  bullet previously claimed, incorrectly, that SSNs in JSON field form go
+  undetected and require prose context — that was an artifact of the test
+  case using a Presidio-blacklisted placeholder SSN, not a real gap; US_SSN
+  detects correctly in bare, prose, and JSON form.** Corrected 2026-08-04;
+  full account in [`docs/threat-model.md`](docs/threat-model.md), including
+  the real, narrower finding that survived and a JSON-validity check on
+  redaction itself.
 - **Tool-argument egress.** The output-stage leak detector does not scan
   tool-call arguments — a canary or PII value carried there is not caught
   the way one in message content is.

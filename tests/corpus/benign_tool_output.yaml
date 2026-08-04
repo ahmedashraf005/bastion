@@ -205,9 +205,9 @@ cases:
   - id: span-ssn-context-001
     band: redaction_span
     expect: redact
-    payload: '{"case_note": "Social Security Number on file: 078-05-1120", "status": "verification_pending"}'
+    payload: '{"case_note": "Social Security Number on file: 234-56-7890", "status": "verification_pending"}'
     expected_redacted_content: '{"case_note": "Social Security Number on file: [REDACTED]", "status": "verification_pending"}'
-    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: fires as PHONE_NUMBER not US_SSN — see report }
+    provenance: { author: Codex, authored: 2026-08-03, source: synthetic SampleBank tool-output corpus, note: value changed 2026-08-04 from 078-05-1120 — that value is one of three canonical placeholder SSNs UsSsnRecognizer.invalidate_result() blacklists, so it asserted nothing; 234-56-7890 correctly fires as US_SSN alone, see report }
   - id: span-iban-001
     band: redaction_span
     expect: allow
