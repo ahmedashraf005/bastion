@@ -43,6 +43,14 @@ CORPUS_BAND_SETS: dict[str, frozenset[str]] = {
             "error_and_metadata",
         }
     ),
+    # Controlled 3x6 factorial isolating serialization alone (see the
+    # corpus file's own header comment): same 3 payload texts held
+    # constant across 6 carrier bands. Same not-a-benign-corpus,
+    # not-a-regression-suite status and the same reason for avoiding the
+    # band name "redaction_span" as tool_output_injection.yaml above.
+    "serialization_carriers.yaml": frozenset(
+        {"bare", "json", "yaml", "xml", "csv", "key_value"}
+    ),
 }
 BANDED_CORPUS_FILENAMES = frozenset(CORPUS_BAND_SETS)
 
