@@ -141,11 +141,11 @@ class CampaignIdentity:
     gate_pattern_version_id: str | None
     config_note: str = CONFIG_IDENTITY_NOTE
     sanitized_note: str = (
-        "sanitized_count is how many attempts had a NUL byte (U+0000) "
-        "stripped from planner- or target-generated text before being "
-        "persisted — Postgres cannot store one at all. Evidence is never "
-        "altered silently; this count is the trace. See "
-        "gate/app/text_sanitization.py."
+        "sanitized_count is how many attempts had a NUL byte (U+0000) or a "
+        "lone UTF-16 surrogate (U+D800-U+DFFF) stripped from planner- or "
+        "target-generated text before being persisted — Postgres cannot "
+        "store either at all. Evidence is never altered silently; this "
+        "count is the trace. See gate/app/text_sanitization.py."
     )
 
 
@@ -331,7 +331,7 @@ def render_text(report: Report) -> str:
     wall_clock = f"{i.wall_clock_seconds:.3f}s" if i.wall_clock_seconds is not None else "n/a (not ended)"
     lines.append(f"  wall clock:          {wall_clock}")
     lines.append(f"  nodes:               {i.node_count} total, {i.pruned_count} pruned, {i.executed_count} executed")
-    lines.append(f"  sanitized:           {i.sanitized_count} attempt(s) had a NUL byte stripped before persistence")
+    lines.append(f"  sanitized:           {i.sanitized_count} attempt(s) had an unsafe character stripped before persistence")
     lines.append(f"    ({i.sanitized_note})")
     lines.append(f"  planner model:       {i.planner_model or 'n/a'}")
     lines.append(f"  inference route:     {i.inference_route or 'n/a'} ({i.inference_base_url or 'n/a'})")

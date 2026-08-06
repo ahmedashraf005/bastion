@@ -71,9 +71,10 @@ requests_table = Table(
     Column("detector_signals", JSONB, nullable=True),
     Column("raw_exact_marker_match", Boolean, nullable=True),
     # True if request_body, response_body, or error had a NUL byte (U+0000)
-    # stripped before this row was written — Postgres cannot store one at
-    # all. Never silent: this is the trace that evidence was altered at the
-    # persistence boundary. See gate/app/text_sanitization.py.
+    # or a lone UTF-16 surrogate (U+D800-U+DFFF) stripped before this row
+    # was written — Postgres cannot store either at all. Never silent: this
+    # is the trace that evidence was altered at the persistence boundary.
+    # See gate/app/text_sanitization.py.
     Column("sanitized", Boolean, nullable=False, server_default=text("false")),
     schema="gate",
 )

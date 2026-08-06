@@ -96,6 +96,60 @@ class StripNulBytesTests(unittest.TestCase):
                 self.assertFalse(changed)
 
 
+class StripLoneSurrogatesTests(unittest.TestCase):
+    """Postgres cannot store a lone UTF-16 surrogate (U+D800-U+DFFF) in any
+    text or JSONB column either -- same crash-and-terminate shape as the NUL
+    case but a different exception (see docs/design/nul-byte-persistence-fix.md).
+    strip_nul_bytes covers both classes in one pass; these tests isolate the
+    surrogate half of that behavior.
+    """
+
+    def test_lone_high_surrogate_is_stripped_and_flagged(self) -> None:
+        value, changed = strip_nul_bytes("before\ud800after")
+        self.assertEqual(value, "beforeafter")
+        self.assertTrue(changed)
+
+    def test_lone_low_surrogate_is_stripped_and_flagged(self) -> None:
+        value, changed = strip_nul_bytes("before\udfffafter")
+        self.assertEqual(value, "beforeafter")
+        self.assertTrue(changed)
+
+    def test_mid_range_surrogate_is_stripped_and_flagged(self) -> None:
+        value, changed = strip_nul_bytes("before\ud92aafter")
+        self.assertEqual(value, "beforeafter")
+        self.assertTrue(changed)
+
+    def test_mixed_nul_and_surrogate_are_both_stripped(self) -> None:
+        value, changed = strip_nul_bytes("a\x00b\ud800c\udfffd")
+        self.assertEqual(value, "abcd")
+        self.assertTrue(changed)
+
+    def test_valid_astral_character_survives_unmangled(self) -> None:
+        """A real emoji is one codepoint outside the surrogate range in a
+        Python str, never two lone-surrogate codepoints -- stripping lone
+        surrogates must never touch it. A fix that mangles this is worse
+        than the crash it's meant to fix.
+        """
+
+        original = "grinning face \U0001f600 done"
+        value, changed = strip_nul_bytes(original)
+        self.assertEqual(value, original)
+        self.assertFalse(changed)
+
+    def test_dict_with_nested_surrogate_is_stripped_and_flagged(self) -> None:
+        original = {
+            "role": "assistant",
+            "content": "the marker is B\ud800ASTION",
+            "meta": {"nested": "cle\udfffan"},
+        }
+        value, changed = strip_nul_bytes(original)
+        self.assertEqual(
+            value,
+            {"role": "assistant", "content": "the marker is BASTION", "meta": {"nested": "clean"}},
+        )
+        self.assertTrue(changed)
+
+
 class StripNulBytesFromAllTests(unittest.TestCase):
     def test_combines_multiple_independent_values_into_one_flag(self) -> None:
         sanitized, changed = strip_nul_bytes_from_all(
