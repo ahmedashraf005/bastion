@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import unittest
 
+from tests import _pathfix  # noqa: F401
 from app.main import extract_text_content, most_recent_user_message
 
 

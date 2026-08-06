@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 from pydantic import TypeAdapter
 
+from tests import _pathfix  # noqa: F401
 from detectors.system_prompt_leak import (
     DetectorPatternVersion,
     LeakPattern,
@@ -19,6 +20,8 @@ from detectors.system_prompt_leak import (
     SystemPromptLeakDetector,
 )
 
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 MARKER_REF = "sample-bank.internal_configuration_marker"
 MARKER = "BASTION-CANARY-7K2M9QX4"
@@ -81,9 +84,9 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        with Path("tests/corpus/bypasses.yaml").open(encoding="utf-8") as corpus_file:
+        with (REPO_ROOT / "tests/corpus/bypasses.yaml").open(encoding="utf-8") as corpus_file:
             cls.bypasses = {case["id"]: case for case in yaml.safe_load(corpus_file)["cases"]}
-        with Path("tests/corpus/benign.yaml").open(encoding="utf-8") as corpus_file:
+        with (REPO_ROOT / "tests/corpus/benign.yaml").open(encoding="utf-8") as corpus_file:
             cls.benign = {case["id"]: case for case in yaml.safe_load(corpus_file)["cases"]}
         cls.detector = SystemPromptLeakDetector.from_definitions(
             [
@@ -100,8 +103,10 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
         )
 
     def test_marker_value_is_not_in_the_pattern_yaml(self) -> None:
-        pattern_yaml = Path("gate/detectors/leak_patterns.yaml").read_text(encoding="utf-8")
-        pattern_versions = Path("gate/detectors/pattern_versions.yaml").read_text(
+        pattern_yaml = (REPO_ROOT / "gate/detectors/leak_patterns.yaml").read_text(
+            encoding="utf-8"
+        )
+        pattern_versions = (REPO_ROOT / "gate/detectors/pattern_versions.yaml").read_text(
             encoding="utf-8"
         )
         self.assertIn(MARKER_REF, pattern_versions)
@@ -387,7 +392,7 @@ class MarkerReferenceDetectorTests(unittest.TestCase):
         actually unreachable) rather than becoming stale allowlist noise.
         """
 
-        root = Path(".")
+        root = REPO_ROOT
         with (root / "gate/detectors/leak_patterns.yaml").open(encoding="utf-8") as f:
             definitions = TypeAdapter(list[LeakPattern]).validate_python(yaml.safe_load(f))
         with (root / "gate/detectors/pattern_versions.yaml").open(encoding="utf-8") as f:

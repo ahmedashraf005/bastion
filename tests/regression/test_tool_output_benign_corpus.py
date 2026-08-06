@@ -17,11 +17,14 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
+from tests import _pathfix  # noqa: F401
 from corpus import CORPUS_BAND_SETS, CORPUS_ROOT, assert_declared_codepoints, load_corpus
 from detectors.presidio_pii import PresidioPiiDetector
 from detectors.system_prompt_leak import SystemPromptLeakDetector
 from policy.engine import PolicyEngine
 
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TEST_MARKERS = {"sample-bank.internal_configuration_marker": "BASTION-CANARY-7K2M9QX4"}
 TOOL_OUTPUT_BANDS = CORPUS_BAND_SETS["benign_tool_output.yaml"]
@@ -31,8 +34,8 @@ class ToolOutputBenignCorpusTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cases = load_corpus(CORPUS_ROOT / "benign_tool_output.yaml")
-        cls.detector = PresidioPiiDetector.from_yaml(Path("gate/detectors/pii_entities.yaml"))
-        cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
+        cls.detector = PresidioPiiDetector.from_yaml(REPO_ROOT / "gate/detectors/pii_entities.yaml")
+        cls.policy = PolicyEngine.from_yaml(REPO_ROOT / "gate/policy/rules.yaml")
 
     def test_fixed_band_manifest_and_utf8_codepoints(self) -> None:
         self.assertEqual(len(self.cases), 46)
@@ -52,9 +55,9 @@ class ToolOutputBenignCorpusTests(unittest.TestCase):
         docs/design/confusables-marker-normalization.md."""
 
         leak_detector = SystemPromptLeakDetector.from_yaml(
-            Path("gate/detectors/leak_patterns.yaml"),
-            Path("gate/detectors/normalization_versions.yaml"),
-            Path("gate/detectors/pattern_versions.yaml"),
+            REPO_ROOT / "gate/detectors/leak_patterns.yaml",
+            REPO_ROOT / "gate/detectors/normalization_versions.yaml",
+            REPO_ROOT / "gate/detectors/pattern_versions.yaml",
             marker_resolver=TEST_MARKERS.__getitem__,
         )
 

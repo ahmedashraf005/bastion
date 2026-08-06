@@ -14,6 +14,7 @@ import unittest
 from types import SimpleNamespace
 from uuid import uuid4
 
+from tests import _pathfix  # noqa: F401
 from app.main import persist_request
 
 

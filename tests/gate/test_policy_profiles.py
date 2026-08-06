@@ -3,6 +3,7 @@
 from pathlib import Path
 import unittest
 
+from tests import _pathfix  # noqa: F401
 from app.policy_profile import GATE_ROOT, active_manifest_version, resolve_policy_profile
 
 

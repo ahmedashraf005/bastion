@@ -22,13 +22,14 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests import _pathfix  # noqa: F401
 from app.config import settings as real_settings
 from app.main import chat_completions, most_recent_tool_message
 from detectors.base import DetectorSignal
 from policy.engine import PolicyEngine
 
 
-RULES_PATH = Path("gate/policy/rules.yaml")
+RULES_PATH = Path(__file__).resolve().parents[2] / "gate/policy/rules.yaml"
 SECRET_MARKER = "SECRET-VALUE"
 
 FAKE_UPSTREAM_RESPONSE = {

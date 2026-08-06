@@ -9,9 +9,12 @@ from pathlib import Path
 
 import yaml
 
+from tests import _pathfix  # noqa: F401
 from detectors.system_prompt_leak import SystemPromptLeakDetector
 from policy.engine import PolicyEngine
 
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 TEST_MARKERS = {
     "sample-bank.internal_configuration_marker": "BASTION-CANARY-7K2M9QX4"
@@ -21,16 +24,16 @@ class BypassRegressionTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        corpus_path = Path("tests/corpus/bypasses.yaml")
+        corpus_path = REPO_ROOT / "tests/corpus/bypasses.yaml"
         with corpus_path.open(encoding="utf-8") as corpus_file:
             cls.cases = yaml.safe_load(corpus_file)["cases"]
         cls.detector = SystemPromptLeakDetector.from_yaml(
-            Path("gate/detectors/leak_patterns.yaml"),
-            Path("gate/detectors/normalization_versions.yaml"),
-            Path("gate/detectors/pattern_versions.yaml"),
+            REPO_ROOT / "gate/detectors/leak_patterns.yaml",
+            REPO_ROOT / "gate/detectors/normalization_versions.yaml",
+            REPO_ROOT / "gate/detectors/pattern_versions.yaml",
             marker_resolver=TEST_MARKERS.__getitem__,
         )
-        cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
+        cls.policy = PolicyEngine.from_yaml(REPO_ROOT / "gate/policy/rules.yaml")
 
     def test_saved_payload_codepoints_are_byte_exact(self) -> None:
         for case in self.cases:

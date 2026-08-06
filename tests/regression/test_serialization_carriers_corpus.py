@@ -24,6 +24,7 @@ from pathlib import Path
 
 import yaml
 
+from tests import _pathfix  # noqa: F401
 from corpus import CORPUS_BAND_SETS, CORPUS_ROOT, assert_declared_codepoints, load_corpus
 from detectors.prompt_guard import PromptGuardDetector
 
@@ -38,7 +39,7 @@ SERIALIZATION_CARRIERS_BAND_ORDER = ("bare", "json", "yaml", "xml", "csv", "key_
 # be regrouped by payload across all 6 carriers for the side-by-side
 # comparison that is this corpus's whole purpose.
 PAYLOAD_TIERS = ("high", "mid", "low")
-RULES_PATH = Path("gate/policy/rules.yaml")
+RULES_PATH = Path(__file__).resolve().parents[2] / "gate/policy/rules.yaml"
 
 
 def _prompt_guard_threshold() -> float:

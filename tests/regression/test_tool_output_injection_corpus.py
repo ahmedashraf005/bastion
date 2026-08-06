@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 
+from tests import _pathfix  # noqa: F401
 from corpus import CORPUS_BAND_SETS, CORPUS_ROOT, assert_declared_codepoints, load_corpus
 from detectors.prompt_guard import PromptGuardDetector
 
@@ -44,7 +45,7 @@ TOOL_OUTPUT_INJECTION_BAND_ORDER = (
     "document_content",
     "error_and_metadata",
 )
-RULES_PATH = Path("gate/policy/rules.yaml")
+RULES_PATH = Path(__file__).resolve().parents[2] / "gate/policy/rules.yaml"
 
 
 def _prompt_guard_threshold() -> float:

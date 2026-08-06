@@ -6,6 +6,7 @@ import asyncio
 import unittest
 from pathlib import Path
 
+from tests import _pathfix  # noqa: F401
 from corpus import (
     CORPUS_ROOT,
     assert_declared_codepoints,
@@ -17,6 +18,8 @@ from policy.engine import PolicyEngine
 from strike.synthesizer.rule_synthesizer import AdditiveNormalization, RuleSynthesizer
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 TEST_MARKERS = {
     "sample-bank.internal_configuration_marker": "BASTION-CANARY-7K2M9QX4"
 }
@@ -27,12 +30,12 @@ class BenignCorpusTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.cases = load_corpus(CORPUS_ROOT / "benign.yaml")
         cls.detector = SystemPromptLeakDetector.from_yaml(
-            Path("gate/detectors/leak_patterns.yaml"),
-            Path("gate/detectors/normalization_versions.yaml"),
-            Path("gate/detectors/pattern_versions.yaml"),
+            REPO_ROOT / "gate/detectors/leak_patterns.yaml",
+            REPO_ROOT / "gate/detectors/normalization_versions.yaml",
+            REPO_ROOT / "gate/detectors/pattern_versions.yaml",
             marker_resolver=TEST_MARKERS.__getitem__,
         )
-        cls.policy = PolicyEngine.from_yaml(Path("gate/policy/rules.yaml"))
+        cls.policy = PolicyEngine.from_yaml(REPO_ROOT / "gate/policy/rules.yaml")
 
     def test_fixed_band_manifest_and_utf8_codepoints(self) -> None:
         self.assertGreaterEqual(len(self.cases), 40)

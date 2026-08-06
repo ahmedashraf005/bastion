@@ -3,6 +3,7 @@
 import unittest
 from unittest.mock import patch
 
+from tests import _pathfix  # noqa: F401
 from app.main import load_prompt_guard
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import unittest
 
+from tests import _pathfix  # noqa: F401
 from app.text_sanitization import strip_nul_bytes, strip_nul_bytes_from_all
 
 

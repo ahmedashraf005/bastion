@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from starlette.requests import Request
 
+from tests import _pathfix  # noqa: F401
 from app import main as gate_main
 from detectors.base import DetectorSignal
 

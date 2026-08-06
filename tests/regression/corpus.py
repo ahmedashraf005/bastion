@@ -11,6 +11,7 @@ from typing import Callable
 
 import yaml
 
+from tests import _pathfix  # noqa: F401
 from detectors.system_prompt_leak import SystemPromptLeakDetector
 from policy.engine import PolicyEngine
 

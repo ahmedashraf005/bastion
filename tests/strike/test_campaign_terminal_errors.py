@@ -12,6 +12,9 @@ from strike.app.runner import (
 )
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 class CampaignTerminalErrorTests(unittest.TestCase):
     def test_exception_before_any_attempt_is_error(self) -> None:
         try:
@@ -38,7 +41,7 @@ class CampaignTerminalErrorTests(unittest.TestCase):
 
     def test_branching_demo_budget_has_measured_feasibility_headroom(self) -> None:
         attempts_file = load_attempts(
-            Path("strike/attempts/canary_leak_branching.yaml")
+            REPO_ROOT / "strike/attempts/canary_leak_branching.yaml"
         )
 
         self.assertEqual(attempts_file.max_queries, 20)
@@ -59,7 +62,7 @@ class CampaignTerminalErrorTests(unittest.TestCase):
         exactly len(attempts) queries and finishes in seconds.
         """
 
-        attempts_file = load_attempts(Path("strike/attempts/canary_leak.yaml"))
+        attempts_file = load_attempts(REPO_ROOT / "strike/attempts/canary_leak.yaml")
 
         self.assertEqual(attempts_file.attempt_source, "static")
         self.assertEqual(len(attempts_file.attempts or []), 5)
