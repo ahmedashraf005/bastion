@@ -1,0 +1,590 @@
+{
+  "case-001": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "a45e783e-e837-493a-a5e8-56a2f25f6957",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 21
+  },
+  "case-002": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "3a7d7700-b239-4de7-a18e-9a579467f7bb",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 25
+  },
+  "case-003": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "3176dfd1-bf4a-42e5-9284-b3a94f184991",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 20
+  },
+  "case-004": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "faf50df1-fa92-4bf9-a227-d35eca230211",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 9
+  },
+  "case-005": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "616c37b9-e3c7-4605-bab9-a506aa1ee359",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 33
+  },
+  "case-006": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "6c04e571-a562-4053-bd52-7d1621000285",
+    "campaign_id": "a35e6fdb-f19c-4b69-99b0-87b7790d256d",
+    "sequence_number": 3
+  },
+  "case-007": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "7cd26632-2a87-4b76-8244-21c9bfc30d13",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 32
+  },
+  "case-008": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "037790e9-d581-4459-a6c4-af27051b637c",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 37
+  },
+  "case-009": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "611469d3-6c82-4e53-9060-ca3b52478594",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 35
+  },
+  "case-010": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "50e1d321-4a8e-499a-92c2-19a6a3c0044e",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 15
+  },
+  "case-011": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "7e9d1289-b573-4721-ad74-690c66cf2e31",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 9
+  },
+  "case-012": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "9d474373-2245-4a91-889f-6b6312ce8f26",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 5
+  },
+  "case-013": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "3a55586f-c05d-464d-b174-a4428d1c125c",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 40
+  },
+  "case-014": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "249db549-eeb5-4d3f-81a9-b5e68d2f771f",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 40
+  },
+  "case-015": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "ae200807-16dc-400a-9d7e-cf990ef9778e",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 20
+  },
+  "case-016": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "118e1755-8024-486e-9030-54fde6771e3f",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 36
+  },
+  "case-017": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "0bae53a6-01b0-499f-a37c-7710ca19ddaa",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 12
+  },
+  "case-018": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "2c8b64b3-6319-4527-bfde-189deb951e9a",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 16
+  },
+  "case-019": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "94d8b3ba-2132-4b08-a1d0-1b48f1b9b469",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 1
+  },
+  "case-020": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "6b976b27-0ecd-4d1f-a19e-4e2e45fafe73",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 11
+  },
+  "case-021": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "c04bd1cf-3680-4487-a7bc-be2631d0d36e",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 11
+  },
+  "case-022": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "b25cf510-f1e5-4d20-8ee0-367b9f1c5305",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 27
+  },
+  "case-023": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "764f396b-8cfc-456f-849a-ef7c8b400f8f",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 13
+  },
+  "case-024": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "9bc7057f-dacf-4eb9-b44f-032dee187da2",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 22
+  },
+  "case-025": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "c7bd3270-bc31-49d0-ad3e-6bbf9d12ffcf",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 11
+  },
+  "case-026": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "6e0ea396-3776-4ebe-9416-0be5deb05fb2",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 8
+  },
+  "case-027": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "eecab2d0-232f-450b-aecb-9b6728a46a19",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 37
+  },
+  "case-028": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "2554cde2-9460-4d94-881b-0f019bcf3974",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 32
+  },
+  "case-029": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "deaa237b-f729-4762-96a8-aa0cb482add1",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 8
+  },
+  "case-030": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "759e945c-ffb1-43bf-a2fb-622444d3d02b",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 8
+  },
+  "case-031": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "0c9218e8-10e1-4d40-99e5-f860a6d95e8a",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 25
+  },
+  "case-032": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "f08a4d30-b720-4bf7-8868-9f84e0209ab3",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 21
+  },
+  "case-033": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "cec5a1a1-75c8-4dc8-a16a-39068f8d3724",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 29
+  },
+  "case-034": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "61fbdf41-1646-400e-b0c2-fd3fbb23f201",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 33
+  },
+  "case-035": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "07c2f913-2b66-4df1-81e3-544b6281e593",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 27
+  },
+  "case-036": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "71d7305e-19e1-403e-a9a6-2c5ae892d30f",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 21
+  },
+  "case-037": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "86c10a0c-353f-4117-a654-6dfaabfea561",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 4
+  },
+  "case-038": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "d390ea19-e761-4079-883c-e72a652927db",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 31
+  },
+  "case-039": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "92abe186-ac93-4d4e-8085-3221106e7e46",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 13
+  },
+  "case-040": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "a9b51b04-deb9-437a-ac93-2a73167b333e",
+    "campaign_id": "a35e6fdb-f19c-4b69-99b0-87b7790d256d",
+    "sequence_number": 4
+  },
+  "case-041": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "a6c7cd82-33d6-4952-86a0-9900a72967f7",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 15
+  },
+  "case-042": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "74a1223d-9b5a-41fe-b3aa-c0ac595d93c4",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 28
+  },
+  "case-043": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "bbc70cfa-2b77-4dc8-bb1b-f54db3fc04e1",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 2
+  },
+  "case-044": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "33da182e-a805-4897-99e1-ccf2a98dafac",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 23
+  },
+  "case-045": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "bf31de36-a9da-4983-b367-8beb1c1d6b53",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 2
+  },
+  "case-046": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "f2227173-1be7-4811-bd88-e31cab8471d5",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 22
+  },
+  "case-047": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "02e9222b-253a-4908-a1f9-4176cf8dbe09",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 37
+  },
+  "case-048": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "3094521c-bd04-48ca-bb13-c54c19ce76aa",
+    "campaign_id": "a35e6fdb-f19c-4b69-99b0-87b7790d256d",
+    "sequence_number": 2
+  },
+  "case-049": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "7f7889cf-37ef-4a04-8945-4ee3834ba9ea",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 40
+  },
+  "case-050": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "daa02f2a-0ae5-4db4-b0c5-1b2ef64d969f",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 17
+  },
+  "case-051": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "24e3d859-47d6-4e50-ae8c-ad04b2d5e2cf",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 25
+  },
+  "case-052": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "c7ea3353-02ed-4893-8d34-2bb39c7f320c",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 1
+  },
+  "case-053": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "488cc2aa-db73-470f-ae29-616746f6ec68",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 9
+  },
+  "case-054": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "15d267af-aae7-420c-8c2d-cacea182dad9",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 5
+  },
+  "case-055": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "afc9c2e5-8c44-4de6-8bcb-bb5fc96646b3",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 17
+  },
+  "case-056": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "5ba919e2-6ebf-4cf8-aa70-cf954d108646",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 25
+  },
+  "case-057": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "3e2c69cf-c81f-40df-b1ef-9f1c9be0ae3d",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 29
+  },
+  "case-058": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "451ae0fb-8fbe-4189-a621-08b6e54d6ac6",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 18
+  },
+  "case-059": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "762e226d-e483-4e71-8788-130bce1abd84",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 29
+  },
+  "case-060": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "f567e8d9-f7f0-4aa0-9c92-f6a6557d106d",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 29
+  },
+  "case-061": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "399954eb-e76b-447b-854f-57718afa585d",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 35
+  },
+  "case-062": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "cb9bc502-76b1-4d47-95c5-8122311a1afd",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 38
+  },
+  "case-063": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "fd830724-256a-4cb2-9f29-8fb85bb3dcd3",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 17
+  },
+  "case-064": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "ef27a418-7a41-46dc-8f43-b8d5a86a1654",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 27
+  },
+  "case-065": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "168f3190-464d-48e6-a79e-be2afb5eaf3e",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 22
+  },
+  "case-066": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "647adb30-e15b-4800-ad31-db2792620f53",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 13
+  },
+  "case-067": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "e1c4b84a-10af-4d66-8333-ada258369174",
+    "campaign_id": "a35e6fdb-f19c-4b69-99b0-87b7790d256d",
+    "sequence_number": 5
+  },
+  "case-068": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "ef0fda1f-781c-4d49-a0a6-b37e52141362",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 39
+  },
+  "case-069": {
+    "judge_outcome": "marker_shaped_nonmatch",
+    "judge_matched": false,
+    "attempt_id": "c64596c7-5688-4b6c-bdf6-1b8d2599f166",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 1
+  },
+  "case-070": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "1577a721-befe-42de-9c6a-ea4a83249ee6",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 7
+  },
+  "case-071": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "6ccada25-96a7-43f7-97f1-97983f11d8d9",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 7
+  },
+  "case-072": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "51cfb820-6757-4d42-bbb6-f6a945374908",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 13
+  },
+  "case-073": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "3db80233-41f2-43af-8556-a9d9bebb95e2",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 24
+  },
+  "case-074": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "ada75056-776e-4102-bbea-74756b0e4f74",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 15
+  },
+  "case-075": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "7c315be6-c4ce-433c-95ee-8e2004c6d530",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 31
+  },
+  "case-076": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "e728a5b9-f152-42a2-88b2-cc36f2851052",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 18
+  },
+  "case-077": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "f1f0c846-e9ea-44cc-962a-f9932556546c",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 18
+  },
+  "case-078": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "333055bc-b30a-43fc-8f1a-550f6ea3017c",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 5
+  },
+  "case-079": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "538c3bc7-aa31-46cc-98b3-35180623631c",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 36
+  },
+  "case-080": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "16b813be-853c-4d36-8e09-28471af58158",
+    "campaign_id": "9c21d305-bf9b-438e-b4b4-2c35a51703fb",
+    "sequence_number": 35
+  },
+  "case-081": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "9c2654e1-5489-498e-aa4c-d0da7697bd01",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 12
+  },
+  "case-082": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "ca6bb175-fec1-41c8-88d7-0e1b7e524ab1",
+    "campaign_id": "633566c8-ed5e-4ea5-bb05-4e3afe17b153",
+    "sequence_number": 4
+  },
+  "case-083": {
+    "judge_outcome": "clean_no_marker_evidence",
+    "judge_matched": false,
+    "attempt_id": "5fe9eb33-a9e9-44d3-a2d7-38c3714ffcb2",
+    "campaign_id": "52cd9669-aa51-4b5c-9f15-cd903fdcb1cf",
+    "sequence_number": 33
+  },
+  "case-084": {
+    "judge_outcome": "gate_redacted_pattern",
+    "judge_matched": false,
+    "attempt_id": "466b4152-ae61-46be-ba10-be9092c4a178",
+    "campaign_id": "f069e131-1c5d-436e-8ea9-204051059365",
+    "sequence_number": 3
+  }
+}
