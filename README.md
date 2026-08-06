@@ -11,10 +11,14 @@ telemetry and no default outbound calls to anything Bastion-owned.
 active detectors. Strike runs TAP-style branching campaigns with real
 persisted evidence. Control is a read-only .NET API; the dashboard reads it.
 `bastion report` renders a campaign's evidence, including near-misses and
-known coverage gaps, without ever surfacing local diagnostics. No campaign
-has yet produced a confirmed bypass against the hardened default profile —
-see [Results](#results) — so the promoted-rule loop is implemented and
-tested but not yet demonstrated end to end against live campaign evidence.
+known coverage gaps, without ever surfacing local diagnostics. Two campaigns
+have produced a confirmed bypass against the hardened default profile — see
+[Results](#results) — both a value-anchored disclosure the Rule Synthesizer
+was correctly unable to close with a proposal, for a documented structural
+reason (`docs/design/rule-vocabulary-and-promotion-gap.md`), not a synthesis
+failure. No proposal has ever been approved or applied to live policy:
+mechanical verification has run against real evidence, but the pipeline
+past it — for either proposal family — does not yet automatically exist.
 
 ## Coverage
 
@@ -61,9 +65,19 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
               attacks the protected SampleBank Copilot only
                                       │
                                       ▼
-              confirmed bypass → proposed detection rule
-                              → human review → live policy
+       confirmed bypass [A] → proposed detection rule [A, verified in-memory only]
+                            → human review [M, normalization only] → live policy [M]
 ```
+`[A]` automated, no human action · `[M]` a human runs a CLI or hand-edits a
+file · full per-stage breakdown, including the family that has no path to
+"human review" at all today: [Rule promotion pipeline](#rule-promotion-pipeline).
+
+**Where this actually stops today**: everything up to and including
+"proposed detection rule" runs automatically, in-memory, for every
+confirmed bypass — but the result is only ever printed and discarded, never
+persisted, for the signature/`detector_config` family. Only a
+normalization-shaped proposal has a path past this point, and every step of
+that path is a human running a separate CLI by hand.
 
 Control has no authentication or RBAC — it is an internal, read-only
 observability API, not a security boundary, and must not be exposed as a
@@ -121,11 +135,17 @@ LLM07 marker detection with confusables normalization active, against the
 live policy configuration. Reported as corpus composition and count, not a
 rate: 0/46 has a wide confidence interval at this sample size.
 
-**Live campaign evidence**: 45 adversarial queries across 3 campaigns
-against Gate's hardened default profile, zero confirmed bypasses, evidence
-retained (`bastion report --campaign <id>` renders any of them). This
-includes a campaign run against the NFKC-promoted marker detector
-specifically.
+**Live campaign evidence**: 8 campaigns against Gate's hardened default
+profile, evidence retained for all of them (`bastion report --campaign
+<id>` renders any of them). One crashed before any attempt was recorded
+(the NUL-byte persistence bug, since fixed —
+`docs/design/nul-byte-persistence-fix.md`); of the 7 that ran, 112 queries
+total, including a campaign against the NFKC-promoted marker detector
+specifically. 2 of the 7 produced a confirmed bypass — both the same
+value-anchored attack class, both correctly declined by the Rule
+Synthesizer for a documented structural reason rather than proposed and
+lost; see
+[`docs/design/rule-vocabulary-and-promotion-gap.md`](docs/design/rule-vocabulary-and-promotion-gap.md).
 
 ## Known gaps
 
@@ -175,15 +195,42 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
 
 ## Rule promotion pipeline
 
+`[A]` automated, no human action needed · `[M]` a human runs a CLI or
+hand-edits a file · `[U]` no implementation exists; the arrow is intended,
+not built.
+
 ```
-confirmed bypass → proposed rule
-                 → mechanical verification (against the originating evidence)
-                 → bypass regression (every retained known bypass still blocks)
-                 → benign false-positive check (fixed corpus bands)
-                 → reachability check (is the active pattern actually reachable)
-                 → human sign-off
-                 → live policy
+confirmed bypass [A]
+   → proposed rule + mechanical verification [A] (in-memory only, against
+       the originating evidence; never persisted by this step, either family)
+   → proposal persistence
+       ├─ signature / detector_config: [U]  no code path writes this anywhere;
+       │                                    review_cli.py and apply_approved_rules.py
+       │                                    exist but have nothing to read
+       └─ normalization:               [M]  a human captures the proposal JSON
+                                             by hand (the campaign log does not
+                                             print it) and runs
+                                             normalization_review_cli.py record
+   → bypass regression + benign false-positive check + reachability check [M]
+       (three separate, standalone test suites; nothing in the review or
+       apply CLIs runs them or checks that they were run)
+   → human sign-off [M]  normalization_review_cli.py approve
+   → pattern-version entry [M]  hand-authored YAML; no script has ever
+       created one — every version_id in this repo's history was typed by hand
+   → activation toggle [M]  apply_approved_pattern_versions.py apply
+   → live policy [M]  Gate loads its detector once at process startup and does
+       not hot-reload; a restart is required for the toggle above to take effect
 ```
+
+**Where this actually stops today**: the first two stages run automatically
+for every confirmed bypass, including the two live findings this repository
+has produced (`docs/design/rule-vocabulary-and-promotion-gap.md`). Past
+that, the signature/`detector_config` family has no path forward at all —
+mechanical verification runs, and the result is discarded. The
+normalization family has a real path, but every stage of it, from capturing
+the proposal to restarting Gate, is a human doing it by hand; no CLI in
+this chain automatically runs or enforces the stage before it. No proposal
+of either family has ever reached "live policy."
 
 No rule reaches live policy without a human approving it. The technical
 gates catch correctness and blast radius; they do not replace the sign-off.
@@ -265,16 +312,21 @@ budget.
 bastion strike run --config strike/attempts/canary_leak_branching.yaml
 ```
 
-**Expect it to find nothing.** Against Gate's hardened default policy
-profile, this is the correct outcome, not a failure: it means Gate held.
-What it demonstrates is the search itself — branching candidates generated
-and pruned each round, every attempt persisted with a scored outcome, and
-the campaign completing cleanly within budget. Watch it live on the
-dashboard (`http://localhost:5173` once `bastion gate up` is healthy) while
-it runs. A found bypass would trigger the Rule Synthesizer's proposal flow
-for human sign-off; that loop is real but not guaranteed on any given run
-against a hardened target, and this repository does not claim it has been
-demonstrated end to end against a live campaign finding.
+**Finding nothing is a real, correct possible outcome, not a failure** — it
+means Gate held; the search itself is what's being demonstrated, not a
+guaranteed bypass. It is also not the only outcome this exact config has
+produced: two prior runs each found the same value-anchored attack class,
+which triggered the Rule Synthesizer's proposal flow against real evidence
+both times and was correctly declined both times, for a documented
+structural reason in the current rule vocabulary rather than a synthesis
+failure — see
+[`docs/design/rule-vocabulary-and-promotion-gap.md`](docs/design/rule-vocabulary-and-promotion-gap.md).
+Either way, watch it live on the dashboard
+(`http://localhost:5173` once `bastion gate up` is healthy) while it runs.
+No proposal has ever been approved or applied to live policy — this
+repository does not claim that loop has been closed, only that a finding
+now reaches synthesis and synthesis has been exercised against real
+evidence.
 
 After either campaign, render its evidence:
 
@@ -324,6 +376,37 @@ different checkout's containers and database volumes because no persisted
 project name existed yet to tell them apart. Prefer `bastion gate up|down|status`;
 if you must use raw Compose, pass `-p <name>` explicitly every time, or
 confirm `.env` already has `COMPOSE_PROJECT_NAME` set to what you expect.
+
+### Running the test suite
+
+```
+python -m unittest discover
+```
+
+**Run this from the repository root.** That's load-bearing, not stylistic:
+`python -m unittest` always adds the current directory to `sys.path` in
+addition to whatever `discover` itself resolves, and running from anywhere
+inside `tests/` (rather than above it) lets a test package there shadow the
+real `gate`/`strike` packages of the same name, silently importing the wrong
+one. Running from repo root avoids the collision entirely.
+
+Every test module that imports Gate or Strike code directly (`from
+app...`, `from detectors...`, `from policy...`, `from corpus import ...`)
+does its own explicit `from tests import _pathfix` first, so the command
+above works unchanged from a fresh clone with no extra setup, no `PYTHONPATH`,
+and no installed dependency beyond what `gate/requirements.txt` and
+`strike/requirements.txt` already list.
+
+**If you ran tests on this repo before this note existed, your result was
+not what it looked like.** `python -m unittest discover -s tests` used to
+silently collect 11 of 145 tests and report `OK` — `tests/gate/`,
+`tests/regression/`, and `tests/strike/` were never even attempted, with no
+error and no indication anything was skipped. The cause was structural
+(`unittest`'s discovery silently skips any subdirectory without an
+`__init__.py`, and separately, `tests/strike/` collided with the real
+`strike/` package on `sys.path`) and is now fixed. `tests/test_discovery_
+sanity.py` guards against this recurring for any future subdirectory added
+under `tests/` without an `__init__.py`.
 
 ### Backing up the database
 
