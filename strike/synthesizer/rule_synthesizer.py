@@ -22,9 +22,13 @@ from pydantic import (
 )
 
 from gate.detectors.system_prompt_leak import SystemPromptLeakDetector
+from strike.marker_redaction import (
+    MARKER_PLACEHOLDER,
+    marker_spans as _marker_spans,
+    replace_markers as _replace_markers,
+)
 
 
-MARKER_PLACEHOLDER = "<<CONFIGURED_MARKER>>"
 MARKER_REFS = frozenset({"sample-bank.internal_configuration_marker"})
 UNICODE_CATEGORIES = frozenset({"Cf", "Cc", "Zs", "Zl", "Zp"})
 NAMED_NORMALIZATION_CLASSES = frozenset({"unicode_whitespace", "ascii_separators"})
@@ -177,46 +181,6 @@ class FindingEvidence(BaseModel):
     attack_turns: list[dict[str, str]]
     target_reply: str
     normalization_evidence: dict[str, object] | None = None
-
-
-def _marker_spans(value: str, marker_values: frozenset[str]) -> list[tuple[int, int]]:
-    """Locate literal and separator/Cf-formatted marker regions without exposing them."""
-
-    spans: list[tuple[int, int]] = []
-    for marker_value in marker_values:
-        direct_start = value.find(marker_value)
-        if direct_start >= 0:
-            spans.append((direct_start, direct_start + len(marker_value)))
-            continue
-        canonical: list[str] = []
-        source_indexes: list[int] = []
-        for index, character in enumerate(value):
-            if character in " \t\n\r-_." or character.isspace() or unicodedata.category(character) == "Cf":
-                continue
-            canonical.append(character)
-            source_indexes.append(index)
-        canonical_marker = "".join(
-            character
-            for character in marker_value
-            if character not in " \t\n\r-_." and not character.isspace()
-        )
-        start = "".join(canonical).find(canonical_marker)
-        if start >= 0:
-            spans.append((source_indexes[start], source_indexes[start + len(canonical_marker) - 1] + 1))
-    return sorted(spans)
-
-
-def _replace_markers(value: str, marker_values: frozenset[str]) -> str:
-    spans = _marker_spans(value, marker_values)
-    if not spans:
-        return value
-    pieces: list[str] = []
-    cursor = 0
-    for start, end in spans:
-        pieces.extend((value[cursor:start], MARKER_PLACEHOLDER))
-        cursor = end
-    pieces.append(value[cursor:])
-    return "".join(pieces)
 
 
 def _masked_codepoint_sequence(value: str, marker_values: frozenset[str]) -> str:
@@ -410,8 +374,14 @@ Use the detector normalization state as authoritative. Generalize to the smalles
         ]
 
     def _secret_in_rule_rejection_reason(self, candidate: Proposal) -> str | None:
+        # marker_spans(), not a literal `marker in serialized` substring
+        # check: a naive substring test only catches the full label+value
+        # together and misses a value-only leak (e.g. "the answer is
+        # 7K2M9QX4", no label) -- the same gap this exact naive check had
+        # in strategy_library.py's promote() guard before that fix. See
+        # docs/threat-model.md's closed gap-register entry.
         serialized = json.dumps(candidate.model_dump(mode="json"), ensure_ascii=False)
-        if any(marker and marker in serialized for marker in self._forbidden_marker_values):
+        if _marker_spans(serialized, self._forbidden_marker_values):
             return "contains_configured_marker_value"
         return None
 

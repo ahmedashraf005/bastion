@@ -603,6 +603,7 @@ async def run_campaign(
             settings.ollama_base_url,
             settings.embedding_model,
             request_timeout_seconds=settings.request_timeout_seconds,
+            forbidden_marker_values={resolved_marker.value},
         )
         retrieved_strategies = await strategy_library.retrieve(
             attempts_file.objective, attempts_file.strategy_retrieval_k
