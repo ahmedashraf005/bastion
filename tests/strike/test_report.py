@@ -153,7 +153,7 @@ class SanitizedFlagVisibilityTests(unittest.TestCase):
         report = build_report(_campaign_row(), attempts, [], [])
         text = render_text(report)
         self.assertIn("sanitized:", text)
-        self.assertIn("1 attempt(s) had a NUL byte stripped", text)
+        self.assertIn("1 attempt(s) had an unsafe character stripped", text)
 
     def test_sanitized_count_appears_in_rendered_json(self) -> None:
         attempts = [
