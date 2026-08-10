@@ -76,9 +76,16 @@ def marker_spans(value: str, marker_values: frozenset[str]) -> list[tuple[int, i
 
     spans: list[tuple[int, int]] = []
     for marker_value in marker_values:
-        direct_start = value.find(marker_value)
-        if direct_start >= 0:
+        found_direct = False
+        search_start = 0
+        while True:
+            direct_start = value.find(marker_value, search_start)
+            if direct_start < 0:
+                break
+            found_direct = True
             spans.append((direct_start, direct_start + len(marker_value)))
+            search_start = direct_start + len(marker_value)
+        if found_direct:
             continue
 
         canonical, source_indexes = canonicalize_with_source_indexes(value)
@@ -87,14 +94,21 @@ def marker_spans(value: str, marker_values: frozenset[str]) -> list[tuple[int, i
             for character in marker_value
             if character not in _SEPARATOR_CHARACTERS and not character.isspace()
         )
-        full_start = canonical.find(canonical_marker)
-        if full_start >= 0:
+        found_full = False
+        search_start = 0
+        while True:
+            full_start = canonical.find(canonical_marker, search_start)
+            if full_start < 0:
+                break
+            found_full = True
             spans.append(
                 (
                     source_indexes[full_start],
                     source_indexes[full_start + len(canonical_marker) - 1] + 1,
                 )
             )
+            search_start = full_start + len(canonical_marker)
+        if found_full:
             continue
 
         # Full label+value not found contiguously -- search for the value
