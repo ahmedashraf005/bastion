@@ -1,24 +1,56 @@
 # Bastion
 
-Bastion is a locally-run purple-team firewall for LLM applications: a
-detection and policy gateway (Gate) paired with an autonomous red-team
-engine (Strike) that attacks the protected app and feeds confirmed bypasses
-back as proposed defensive rules for human sign-off. It never phones home —
-everything runs on your machine against local infrastructure, with no
-telemetry and no default outbound calls to anything Bastion-owned.
+Bastion is a locally-run security-testing tool for LLM applications, in two
+parts. **Gate** is a detection and policy gateway — an OpenAI-compatible
+proxy that inspects traffic for prompt injection (LLM01, Prompt Guard 2),
+sensitive-information disclosure (LLM02, Presidio), and system-prompt
+leakage (LLM07, a value-anchored marker detector), without breaking
+streaming or losing any of the wire protocol it passes through. **Strike**
+is an on-demand red-team engine that runs TAP-style adaptive campaigns
+against the protected app and has found two genuine bypasses of a real
+attack class. It never phones home — everything runs on your machine
+against local infrastructure, with no telemetry and no default outbound
+calls to anything Bastion-owned.
+
+**The primary output is app-level remediation, not automatic rule
+promotion**: here is the bypass, here is the evidence, here is what to
+change in your application — the model Semgrep and Snyk use, not a
+self-updating firewall. Bastion tests what your *application* does with a
+model's output, not the model's own alignment. Full design reasoning:
+[`docs/design/report-contract.md`](docs/design/report-contract.md).
+
+**What this does not do yet, stated before anything else**: there is no
+automatic rule-promotion pipeline — a confirmed bypass is never turned into
+an applied Gate rule without a human doing every remaining step by hand,
+and one entire proposal family has no path to a human at all. Gate has no
+hot-reload; a rule change requires a process restart. LLM10 (unbounded
+consumption) is not implemented. Indirect/tool-output prompt injection
+isn't covered by any detector. None of this is hidden — full list:
+[What this does not do yet](#what-this-does-not-do-yet). It's the direct
+reason the primary output is app-level remediation rather than a
+closed-loop firewall claim.
 
 **Status: working local MVP.** Gate is a runnable FastAPI proxy with three
 active detectors. Strike runs TAP-style branching campaigns with real
-persisted evidence. Control is a read-only .NET API; the dashboard reads it.
-`bastion report` renders a campaign's evidence, including near-misses and
-known coverage gaps, without ever surfacing local diagnostics. Two campaigns
-have produced a confirmed bypass against the hardened default profile — see
-[Results](#results) — both a value-anchored disclosure the Rule Synthesizer
-was correctly unable to close with a proposal, for a documented structural
-reason (`docs/design/rule-vocabulary-and-promotion-gap.md`), not a synthesis
-failure. No proposal has ever been approved or applied to live policy:
-mechanical verification has run against real evidence, but the pipeline
-past it — for either proposal family — does not yet automatically exist.
+persisted evidence; its success judge covers both LLM07 (the original
+value-anchored marker criterion) and LLM02 (a value-anchored PII canary
+reusing the same matching mechanism rather than adding detector-specific
+judge logic — see [Results](#results)). Control is a
+read-only .NET API; the dashboard reads it. `bastion report` renders a
+campaign's evidence, including near-misses and known coverage gaps,
+without ever surfacing local diagnostics. Two campaigns have produced a
+confirmed bypass against the hardened default profile — see
+[Results](#results) — both the same attack class: the model emits the
+*literal text* of an HTML entity reference (e.g. `&#8203;`) between a
+label's characters instead of the character it names, fragmenting the
+label past what Gate's detector can reassemble, while the value arrives
+clean and contiguous. The Rule Synthesizer correctly declined to propose a
+rule for either, for a documented structural reason
+(`docs/design/rule-vocabulary-and-promotion-gap.md`) — a real engineering
+result in its own right: proving a gap exists by execution, not
+inspection, and refusing to propose a rule that wouldn't actually match,
+rather than papering over the gap. No proposal has ever been approved or
+applied to live policy.
 
 ## Coverage
 
@@ -40,6 +72,43 @@ past it — for either proposal family — does not yet automatically exist.
 
 Indirect prompt injection (LLM01's indirect half), tool-argument egress, and
 multi-choice output scanning are open gaps — see [Known gaps](#known-gaps).
+
+Strike's success judge, separately, now confirms LLM02 bypasses the same
+way it confirms LLM07: a seeded PII canary value, value-anchored, not
+Presidio-based — deliberately, since gating on entity type would inherit
+Presidio's own known false-positive shape (see [Known gaps](#known-gaps)).
+See [Results](#results) for the first live run against it.
+
+## What this does not do yet
+
+Stated together, once, so it doesn't have to be re-derived from scattered
+caveats:
+
+- **No automatic rule promotion.** A confirmed bypass is never turned into
+  an applied Gate rule without a human doing every remaining step by hand
+  — and for the proposal family that produced both of this project's real
+  findings, there is no path to a human at all. See
+  [Rule synthesis: a real, dead-ended result](#rule-synthesis-a-real-but-dead-ended-result).
+- **No hot-reload.** Gate loads its detector configuration once at process
+  startup. A rule change requires a restart, not just approval.
+- **No approve-to-apply path.** Nothing in this repository has ever taken
+  an approved proposal and applied it to live traffic.
+- **LLM10 (unbounded consumption) is not implemented.** Gate persists
+  model-provided usage when the upstream emits it but enforces nothing.
+- **Indirect/tool-output prompt injection is not covered.** Prompt Guard
+  scans user-role message text only.
+- **The success judge is not validated against hand-labelled ground
+  truth.** A hand-labelling effort was scoped and parked — the population
+  available was too skewed toward one outcome to be worth the hours, and
+  agent-based labelling was rejected as circular (a model grading another
+  model's judgement call tends to err the same direction, on the same
+  inputs). Figures derived from it carry a caveat; see
+  [Results](#results).
+
+None of these are aspirational "coming soon" items being quietly implied
+as done — each is a real, currently-true limitation, and each is exactly
+why the primary claim of this project is app-level remediation, not a
+closed-loop automated firewall.
 
 ## Architecture
 
@@ -65,19 +134,17 @@ Client app ──► OpenAI-compatible /v1/chat/completions proxy ──► Upst
               attacks the protected SampleBank Copilot only
                                       │
                                       ▼
-       confirmed bypass [A] → proposed detection rule [A, verified in-memory only]
-                            → human review [M, normalization only] → live policy [M]
+                confirmed bypass ──► bastion report: evidence +
+                                      app-level remediation guidance
+                                      (docs/design/report-contract.md)
 ```
-`[A]` automated, no human action · `[M]` a human runs a CLI or hand-edits a
-file · full per-stage breakdown, including the family that has no path to
-"human review" at all today: [Rule promotion pipeline](#rule-promotion-pipeline).
 
-**Where this actually stops today**: everything up to and including
-"proposed detection rule" runs automatically, in-memory, for every
-confirmed bypass — but the result is only ever printed and discarded, never
-persisted, for the signature/`detector_config` family. Only a
-normalization-shaped proposal has a path past this point, and every step of
-that path is a human running a separate CLI by hand.
+Every confirmed bypass also, separately, reaches the Rule Synthesizer
+automatically, which mechanically proposes and verifies a Gate-side
+detection rule in-memory — a real result, but not the primary output, and
+not something that reaches live policy today. Full accounting, including
+the family that has no path to a human at all:
+[Rule synthesis: a real, dead-ended result](#rule-synthesis-a-real-but-dead-ended-result).
 
 Control has no authentication or RBAC — it is an internal, read-only
 observability API, not a security boundary, and must not be exposed as a
@@ -99,6 +166,20 @@ The repository currently contains 14 ADR documents; they describe decisions,
 not additional runtime dependencies.
 
 ## Results
+
+**The caveat boundary, stated once, before any figure below**: numbers
+that pass through Strike's success judge (`classify_target_response()`) —
+campaign outcome tallies, confirmed-bypass counts, anything derived from
+`strike.attempts`/`strike.findings` — have not been validated against
+hand-labelled ground truth; the judge's false-positive/false-negative
+rates, and which direction it errs in if at all, are unmeasured — see
+[What this does not do yet](#what-this-does-not-do-yet). Read those
+numbers as the judge's classification, not an independently verified
+count. This does **not** apply to Gate's own detector figures
+(corpus detection rate, corpus false-positive count, both below) or to
+the AgentDojo ASR figures immediately below — both are graded
+independently of this judge, by direct detector invocation or by
+AgentDojo's own harness respectively.
 
 **AgentDojo banking suite** (external benchmark, ETH Zurich — chosen because
 it's a target Bastion's author didn't write): llama3.1:8b lands **25.00%
@@ -147,6 +228,26 @@ Synthesizer for a documented structural reason rather than proposed and
 lost; see
 [`docs/design/rule-vocabulary-and-promotion-gap.md`](docs/design/rule-vocabulary-and-promotion-gap.md).
 
+**LLM02 canary campaign**
+([`strike/attempts/pii_leak_canary.yaml`](strike/attempts/pii_leak_canary.yaml)):
+5 static hand-written attempts against the new PII-disclosure criterion —
+zero findings. The target refused every attempt; four of five replies
+named "Social Security number" explicitly while disclosing nothing, and
+none were misclassified as a disclosure. A real result about the
+technique tried (a hand-written attempt list, the same shape as LLM07's
+own early static runs before the adaptive campaigns found a bypass), and
+the strongest evidence yet — observed against live model output, not only
+synthetic test fixtures — for why this criterion is value-anchored rather
+than Presidio-entity-based: none of those four explicit refusals
+false-positived. Full account:
+[`docs/design/judge-scope-extension.md`](docs/design/judge-scope-extension.md) §8.
+
+**LLM02 benchmark-scale numbers**: *(placeholder — not run yet. The
+5-attempt campaign above is a smoke test, not a benchmark. Filling this
+in is the next pass; it should follow the same control-fraction rigor as
+the AgentDojo numbers above, not be added under pressure to have a number
+before the measurement exists.)*
+
 ## Known gaps
 
 Full detail: [`docs/threat-model.md`](docs/threat-model.md).
@@ -181,6 +282,16 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
 - **Multi-choice output scanning.** With `n > 1`, only the first choice is
   output-scanned.
 - **LLM10.** Not implemented — see [Coverage](#coverage).
+- **LLM02's credit-card and partial-value disclosure are out of scope for
+  the current criterion.** The target's protective sentence names both
+  SSN and credit card, but only the SSN is a registered, judged canary —
+  a reply disclosing the canary customer's credit card number in full,
+  without ever stating the SSN, violates the stated policy and produces
+  no finding. Separately, the "in full" qualifier means a
+  last-four-digits-style response, or a value disclosed piecemeal across
+  turns, does not value-anchor and is not confirmed. Both deliberate, not
+  oversights: see
+  [`docs/design/judge-scope-extension.md`](docs/design/judge-scope-extension.md) §7.
 - **Promoted-rule reachability is not guaranteed by the promotion gates.**
   A rule can pass mechanical verification, bypass regression, and the
   benign-corpus check, and still be consulted by nothing, if the detector
@@ -193,47 +304,38 @@ Full detail: [`docs/threat-model.md`](docs/threat-model.md).
   exception. Full account:
   [`docs/design/value-anchored-marker-detection.md`](docs/design/value-anchored-marker-detection.md).
 
-## Rule promotion pipeline
+## Rule synthesis: a real, but dead-ended, result
 
-`[A]` automated, no human action needed · `[M]` a human runs a CLI or
-hand-edits a file · `[U]` no implementation exists; the arrow is intended,
-not built.
+This is documented in full detail because it's a genuine, execution-proven
+engineering result — not because it's the product. It is explicitly not
+the primary output; see the top of this document and
+[`docs/design/report-contract.md`](docs/design/report-contract.md) for
+why.
 
-```
-confirmed bypass [A]
-   → proposed rule + mechanical verification [A] (in-memory only, against
-       the originating evidence; never persisted by this step, either family)
-   → proposal persistence
-       ├─ signature / detector_config: [U]  no code path writes this anywhere;
-       │                                    review_cli.py and apply_approved_rules.py
-       │                                    exist but have nothing to read
-       └─ normalization:               [M]  a human captures the proposal JSON
-                                             by hand (the campaign log does not
-                                             print it) and runs
-                                             normalization_review_cli.py record
-   → bypass regression + benign false-positive check + reachability check [M]
-       (three separate, standalone test suites; nothing in the review or
-       apply CLIs runs them or checks that they were run)
-   → human sign-off [M]  normalization_review_cli.py approve
-   → pattern-version entry [M]  hand-authored YAML; no script has ever
-       created one — every version_id in this repo's history was typed by hand
-   → activation toggle [M]  apply_approved_pattern_versions.py apply
-   → live policy [M]  Gate loads its detector once at process startup and does
-       not hot-reload; a restart is required for the toggle above to take effect
-```
+Every confirmed bypass automatically reaches the Rule Synthesizer, which
+proposes a Gate-side detection rule and mechanically verifies it
+in-memory, against the originating evidence. This ran for real against
+both of this project's live findings and correctly declined both times,
+for a documented structural reason
+([`docs/design/rule-vocabulary-and-promotion-gap.md`](docs/design/rule-vocabulary-and-promotion-gap.md)) —
+not a synthesis bug. Past that point, nothing is automatic:
 
-**Where this actually stops today**: the first two stages run automatically
-for every confirmed bypass, including the two live findings this repository
-has produced (`docs/design/rule-vocabulary-and-promotion-gap.md`). Past
-that, the signature/`detector_config` family has no path forward at all —
-mechanical verification runs, and the result is discarded. The
-normalization family has a real path, but every stage of it, from capturing
-the proposal to restarting Gate, is a human doing it by hand; no CLI in
-this chain automatically runs or enforces the stage before it. No proposal
-of either family has ever reached "live policy."
+| Stage | State |
+|---|---|
+| Proposal + in-memory verification | **Automated** — runs for every confirmed bypass |
+| Persistence — `signature`/`detector_config` family | **Not implemented.** No code path writes this anywhere; `review_cli.py`/`apply_approved_rules.py` exist with nothing to read |
+| Persistence — normalization family | **Manual.** A human hand-captures the proposal JSON (the campaign log doesn't print it) and runs `normalization_review_cli.py record` |
+| Regression / benign-FP / reachability checks | **Manual.** Three standalone test suites; nothing enforces they were run |
+| Human sign-off | **Manual CLI** — `normalization_review_cli.py approve` |
+| Pattern-version entry | **Manual.** Hand-authored YAML; no script has ever created one |
+| Activation → live policy | **Manual CLI**, and Gate has no hot-reload — a restart is required even after activation |
 
-No rule reaches live policy without a human approving it. The technical
-gates catch correctness and blast radius; they do not replace the sign-off.
+**No proposal of either family has ever been approved or applied to live
+policy.** The `signature`/`detector_config` family — the one that
+produced both of this project's real findings — has no path to a human at
+all. The normalization family has a real path, but every single stage of
+it is a person doing it by hand; nothing in the chain enforces the stage
+before it.
 
 ## Quickstart
 
@@ -336,11 +438,16 @@ bastion report --campaign <campaign-id> --format json
 ```
 
 The report covers campaign identity and provenance, coverage (every attempt
-including pruned ones, not just matches), confirmed findings with a
-four-way remediation split, near-misses with edit distance and positional
-overlap, and the known coverage gaps above — restated so a clean report
-reads as deliberate evidence, not silence. Local diagnostics (`error_type`,
-tracebacks) never appear in its output, in either format.
+including pruned ones, not just matches), confirmed findings, near-misses
+with edit distance and positional overlap, and the known coverage gaps
+above — restated so a clean report reads as deliberate evidence, not
+silence. Local diagnostics (`error_type`, tracebacks) never appear in its
+output, in either format. Findings currently render with the remediation
+bucket structure that shipped before the app-level-remediation rescoping
+described at the top of this document — deterministic, per-finding
+remediation text keyed to the evidence, as designed in
+[`docs/design/report-contract.md`](docs/design/report-contract.md), is
+designed but not yet implemented; that's the next code pass, not this one.
 
 The default planner is local Ollama. `--planner openai` is an explicit opt-in
 that requires the caller's `OPENAI_API_KEY` and incurs that provider's cost;
