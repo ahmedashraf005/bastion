@@ -758,11 +758,9 @@ async def chat_completions(request: Request) -> Response:
             )
 
     user_content = "\n".join(
-        message["content"]
+        extract_text_content(message.get("content"))
         for message in body.get("messages", [])
-        if isinstance(message, dict)
-        and message.get("role") == "user"
-        and isinstance(message.get("content"), str)
+        if isinstance(message, dict) and message.get("role") == "user"
     )
     prompt_guard_detector: PromptGuardDetector | None = request.app.state.prompt_guard_detector
     detector_signal = (
