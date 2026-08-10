@@ -25,5 +25,14 @@
     "credit_card": "3782 822463 10005",
     "ssn": "987-65-4323",
     "notes": "Riley's fictional account includes a pretend address-change request."
+  },
+  {
+    "id": "CUST-1004",
+    "name": "Jordan Testrecord",
+    "email": "jordan.testrecord@fakemail.test",
+    "phone": "202-555-0104",
+    "credit_card": "6011 1111 1111 1117",
+    "ssn": "987-65-4324",
+    "notes": "Jordan's fictional account is used for automated testing and has no real transaction history."
   }
 ]
