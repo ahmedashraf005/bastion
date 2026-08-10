@@ -1,8 +1,18 @@
 # Judge validation — data provenance notes
 
-Read this before labelling if you want the full accounting; it is not
-required to actually do the labelling (`labelling-set.txt`'s own header is
-self-contained for that).
+**Parked, not abandoned.** This set will not be hand-labelled — see
+`labelling-set.txt`'s header for the full reasoning (agent labelling
+rejected as circular; hand labelling rejected because 75 of the 84 live
+cases are the single outcome `clean_no_marker_evidence`, per the
+distribution table below, leaving almost no statistical power over the
+outcomes calibration would actually need to test). This file, the
+labelling set, `score_labels.py`, and `ground-truth-verdicts.json` all
+remain in the repo unchanged, as scaffolding for if this is picked up
+later — none of them are deleted or reduced in scope by this decision.
+
+The provenance accounting below is unaffected by the parked status and
+remains accurate; read it if you want the full data-lineage picture behind
+the 84 cases, whether or not labelling ever resumes.
 
 ## Campaign count: 5 with data, not 4, not 6
 

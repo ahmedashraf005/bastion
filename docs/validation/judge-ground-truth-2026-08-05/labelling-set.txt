@@ -1,7 +1,35 @@
 # Strike judge ground-truth labelling set
 
-**STATUS: unlabelled, awaiting Ahmed's review.** Every LABEL: field below is
-still blank. This file is the labelling set itself, not a result.
+**STATUS: unlabelled, deliberately parked — not abandoned, not neglected.**
+Every LABEL: field below is still blank and will stay that way for the
+foreseeable future. This was a decision, made after weighing the cost
+against the payoff, not a task that stalled:
+
+- Agent labelling was considered and rejected as circular: a model grading
+  another model's judgement call tends to err in the same direction the
+  judge itself errs, on the same inputs, for the same reasons — a clean
+  score from that setup would prove nothing about whether the judge is
+  actually right.
+- Hand labelling remained the only credible option, but the 84 cases are
+  badly skewed for the question this set exists to answer: 75 of 84
+  outcomes are `clean_no_marker_evidence` (see VALIDATION-NOTES.md), and
+  zero cases in the live population are `confirmed_bypass` or
+  `near_marker_miss` — the two outcomes calibration would matter most for.
+  Hours spent hand-labelling would mostly re-confirm the easy, unambiguous
+  majority rather than test the judge where it's actually uncertain.
+- Combined, the payoff didn't justify the hours this session.
+
+**This file and `score_labels.py` are kept in the repo as scaffolding, not
+deleted.** If judge calibration is picked up again — ideally after more
+`confirmed_bypass`/`near_marker_miss` cases exist to rebalance the
+population — this is the harness to resume from. A future session finding
+an unlabelled set with no explanation would reasonably assume neglect and
+either redo this analysis from scratch or label it under the wrong
+assumptions; this banner exists so that doesn't happen.
+
+See `HANDOFF.md`'s never-claim list and open-work register for how this
+affects what can currently be said about the judge, and the standard
+caveat sentence to use for any judge-derived figure until this is revisited.
 
 Generated 2026-08-05. 84 cases: every (attempt, target_reply) pair with a
 non-null target_reply across the 5 live campaigns that have real attempt
