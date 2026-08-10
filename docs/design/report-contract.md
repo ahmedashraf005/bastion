@@ -372,22 +372,41 @@ exactly what was tried and what wasn't, not just that nothing bad happened.
 
 ### Findings list
 
+**Amendment, recorded here rather than left only in review feedback**: an
+earlier draft of this wireframe put a `Status` column in the findings list
+reading `[ app fix available ]` on every row — replacing one meaningless
+constant (`not synthesized`, forever, per the current dashboard) with
+another meaningless constant. Every finding that exists has a matching
+remediation template by construction of the taxonomy (§1), so "is
+remediation available" carries zero row-to-row information and doesn't
+belong at the list level *or* as a dedicated column anywhere — a column
+that can only ever hold one value is a column that shouldn't exist. It
+belongs, unlabelled, as the simple fact that a Remediation section is
+present in the detail view (see below) — nothing points at it separately.
+
+What replaces it: something that actually varies row to row.
+**Recommended: the obfuscation mechanism**, once `normalization_evidence`
+is persisted on `strike.findings` (§2's already-recorded missing-evidence
+prerequisite — this is exactly the field that would carry it). This is
+the single most informative thing a row can show: *how* the leak
+happened, not just that one did. Until that column exists, **finding
+class** (the template that matched — currently 1:1 with `owasp_id`, but
+not guaranteed to stay that way as more templates are added per class) is
+the interim row-level signal, since it's already persisted and already
+shown.
+
 ```
 ┌─ Findings ──────────────────────────────────────────────────────────┐
-│ OWASP    Found at             Target        Status                  │
-│ LLM07    2026-08-06 14:02Z    sample-bank   [ app fix available ]   │
-│ LLM07    2026-08-06 15:41Z    sample-bank   [ app fix available ]   │
+│ OWASP    Found at             Target        Mechanism               │
+│ LLM07    2026-08-06 14:02Z    sample-bank   HTML-entity fragment     │
+│ LLM07    2026-08-06 15:41Z    sample-bank   narrow-no-break-space    │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-One row per `strike.findings` row. The status badge no longer reads
-`not synthesized` / `pending_review` / `approved` / `rejected` / `applied`
-(today's `proposed_rules.status`-driven badge, `dashboard/src/components/FindingsTable.tsx`,
-confirmed — it's a passive display of `statusFor()`, not an actionable
-control; see below) — it reads `app fix available`, always, for any
-`strike.findings` row, since every finding that exists has a matching
-template (§2) by construction of the taxonomy. No badge variance to design
-for at the list level; variance belongs in the detail view.
+One row per `strike.findings` row. Until `normalization_evidence` is
+persisted, the `Mechanism` column isn't buildable yet — fall back to
+`OWASP` alone as the only currently-available row-level distinction; do
+not backfill the gap with a constant-value column in the meantime.
 
 ### Finding detail view
 
@@ -423,11 +442,16 @@ for at the list level; variance belongs in the detail view.
 Evidence is always first, above remediation — the reader verifies the claim
 before reading what to do about it. Remediation is the fixed template text
 from §2, populated only from the evidence fields shown above it; nothing in
-this panel is generated per-finding beyond field substitution. The rule
-promotion note sits last, once per finding, small and matter-of-fact — not
-hidden, not emphasized, consistent with §3's decision to keep this
-information out of the primary remediation decision while not deleting it
-from the record entirely.
+this panel is generated per-finding beyond field substitution. This is
+also where "remediation is available" actually belongs, per the findings-list
+amendment above — implicitly, as the mere presence of the `── Remediation
+──` section itself, not as a separate labelled fact. It never needs its
+own "available: yes" line, since a finding without a matching template
+can't exist under this taxonomy (§1) — the section being there at all is
+the only signal required. The rule promotion note sits last, once per
+finding, small and matter-of-fact — not hidden, not emphasized, consistent
+with §3's decision to keep this information out of the primary
+remediation decision while not deleting it from the record entirely.
 
 ### Does the approve control still exist?
 
