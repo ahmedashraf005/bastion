@@ -15,7 +15,7 @@ import sqlalchemy as sa
 import yaml
 from pydantic import BaseModel, Field, model_validator
 from redis import asyncio as redis
-from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from .config import ALLOWED_TARGETS, settings
 from .attempt_sources import (
