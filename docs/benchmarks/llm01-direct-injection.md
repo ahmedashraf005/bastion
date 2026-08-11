@@ -8,14 +8,20 @@ recorded scores, not tuning or a second measurement.
 
 ## Harness-path incident note
 
-The later-discovered non-stream `chat_completions()` `policy_engine` binding
-bug does not affect this measurement. `tests/regression/llm01_injection_harness.py`
-sets `stream: False` in its request-shaped body but calls Gate's shared
-`evaluate_input_request()` directly from `execute_case()`; it does not invoke
-the HTTP route or its non-stream response-stage path. The LLM01 scores therefore
-measure the intended Prompt Guard input detector and input policy path. This
-does not excuse the shipped proxy bug: ordinary live non-stream requests did
-reach the broken route and were fixed separately.
+`tests/regression/llm01_injection_harness.py`'s `execute_case()` sets
+`stream: False` in a request-shaped body but calls
+`evaluate_input_request()` directly. It does not call `chat_completions()` or
+exercise the full proxy request path, including the HTTP route and its
+non-stream response-stage handling. These numbers therefore characterize
+Gate's detector and input-policy path, not the full proxy request path.
+
+That boundary is material: it is the same detector-versus-Gate-path distinction
+that disqualified `tool_output_injection.yaml` from serving as a Gate detection
+corpus. The distinction travels with this measurement so the numbers are not
+later mistaken for end-to-end proxy results. The later-discovered non-stream
+`chat_completions()` `policy_engine` binding bug was real and shipped, but is
+outside this harness path; ordinary live non-stream requests did reach it and
+were fixed separately.
 
 ## Run identity
 
