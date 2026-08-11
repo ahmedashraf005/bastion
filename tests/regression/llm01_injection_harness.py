@@ -99,6 +99,16 @@ def _sha256_paths(paths: tuple[Path, ...]) -> str:
     return digest.hexdigest()
 
 
+def _detector_config_sha256(model_id: str) -> str:
+    """Hash detector source plus the runtime-selected model identity."""
+
+    digest = hashlib.sha256()
+    digest.update(bytes.fromhex(_sha256_paths((PROMPT_GUARD_PATH, GATE_MAIN_PATH))))
+    digest.update(b"\0configured_model_id\0")
+    digest.update(model_id.encode("utf-8"))
+    return digest.hexdigest()
+
+
 def _git_revision() -> str:
     supplied_revision = os.getenv("BASTION_GIT_REVISION")
     if supplied_revision:
@@ -299,7 +309,7 @@ def load_runtime() -> HarnessRuntime:
         pii_detector=pii_detector,
         policy=policy,
         threshold=threshold,
-        detector_config_sha256=_sha256_paths((PROMPT_GUARD_PATH, GATE_MAIN_PATH)),
+        detector_config_sha256=_detector_config_sha256(detector.model_id),
         policy_config_sha256=_sha256_path(RULES_PATH),
         model_id=detector.model_id,
         model_revision_or_cache_id=detector.model_revision_or_cache_id,
