@@ -31,7 +31,7 @@ immutable for the lifetime of a corpus revision. Moving a case between bands
 requires a corpus-only change and a new corpus revision; it may not be
 combined with a Prompt Guard model, threshold, policy, or detector change.
 The initial negative tranche exposed a provenance weakness before positives
-were authored or any score existed, so five published-derived
+were authored or any score existed, so five adjacent-vocabulary
 `adjacent_vocabulary` cases were added as a pre-measurement composition
 revision. The composition below is frozen from this point.
 
@@ -56,7 +56,7 @@ reduced to a single isolated payload if the source case is multi-turn.
 ### Negative controls
 
 The negative set contains 41 cases. `ordinary_text` and
-`structurally_awkward` remain at 12 cases each; five published-derived
+`structurally_awkward` remain at 12 cases each; five adjacent-vocabulary
 controls were added to `adjacent_vocabulary` after the original negative
 tranche was reviewed:
 
@@ -70,12 +70,13 @@ The resulting measured population is 89 cases: 48 labelled positives and 41
 negative controls. The equal positive-band sizes keep the four attack shapes
 visible; the negative bands are intentionally unequal because the
 adjacent-vocabulary band carries more discriminating power and now includes
-five externally sourced controls. This is a deliberately bounded corpus, not
+four externally sourced controls and one authored citation-correction case.
+This is a deliberately bounded corpus, not
 a claim that 89 cases represent the universe of direct injection.
 
 The original 48/36 positive-negative split was deliberately balanced for
 coverage measurement, not realistic traffic where injections are rare. The
-five sourced adjacent-vocabulary additions changed the final inventory to
+four sourced adjacent-vocabulary additions changed the final inventory to
 48/41 before any measurement. Any resulting figure must be described as
 detection coverage across this defined positive set and its fixed controls;
 it must never be presented as expected production performance or a
@@ -157,8 +158,9 @@ mundane, while authored `adjacent_vocabulary` is materially weaker evidence.
 That band is intended to contain legitimate instruction-shaped language that
 a naive detector could plausibly mistake for an injection; when the same
 authoring process creates it, it primarily measures one person's model of
-what looks confusing. Five published-derived adjacent-vocabulary controls
-were added to reduce that weakness, but they do not erase the limitation.
+what looks confusing. Four published-derived adjacent-vocabulary controls
+were retained to reduce that weakness; the fifth addition was downgraded to
+authored after citation verification, so the limitation remains.
 
 The positive tranche contains 36 published-derived adaptations and 12
 explicitly authored gap-fillers, three in each positive band. Published-derived
@@ -330,7 +332,7 @@ It cannot measure:
   bands.
 - a realistic production base rate: the corpus deliberately over-samples
   injections, so its positive coverage is not expected traffic performance;
-- a provenance-free estimate of benign traffic: 36 of the 41 negative
+- a provenance-free estimate of benign traffic: 37 of the 41 negative
   controls are authored, and the authored adjacent-vocabulary cases are the
   most consequential limitation because they encode the author's own idea
   of what a naive detector might confuse with an injection.
