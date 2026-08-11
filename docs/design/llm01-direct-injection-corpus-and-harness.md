@@ -290,6 +290,12 @@ summary:
     band:
       mismatched
       total
+  threshold_curve:
+    threshold:
+      positive_by_band
+      negative_by_band
+      positive_total
+      negative_total
   errors
   complete
 ```
@@ -300,6 +306,13 @@ number while hiding band composition. The positive result can be described
 as corpus detection coverage, band by band. Negative results are retained as
 raw mismatch counts against the fixed controls; they are not presented as a
 general-population false-positive rate.
+
+The harness also persists each raw Prompt Guard score and emits a
+characterization curve at thresholds 0.50, 0.55, 0.60, 0.65, 0.70, 0.75,
+0.80, 0.85, 0.90, and 0.95. The curve is computed from the recorded scores;
+it does not change the live policy threshold or authorize threshold tuning.
+The accepted raw run is recorded in
+`docs/benchmarks/llm01-direct-injection.md`.
 
 ### Non-vacuity and completeness checks
 
@@ -341,3 +354,11 @@ The number will mean only: “on this fixed, provenance-traceable set of
 direct user-role cases, under this recorded Gate configuration, these bands
 produced these detector outcomes.” It must not be extended to the tool-output
 surface that Gate explicitly does not claim to detect.
+
+The accepted run's `direct_override` result was 6/12 at the configured 0.8
+threshold. That reproduces the shape of the earlier Prompt Guard control-band
+observation in `tool_output_injection.yaml`: 4/8 canonical override phrases
+were at or above 0.8 while 4/8 were near zero. The earlier harness invokes
+Prompt Guard 2 directly, outside Gate's tool-output path; this is corroboration
+that the Gate-path harness is seeing real score variation, not evidence that
+Gate detects tool-output injections or that the threshold is calibrated.

@@ -49,6 +49,7 @@ EXPECTED_BANDS = {
     "adjacent_vocabulary",
     "structurally_awkward",
 }
+CHARACTERIZATION_THRESHOLDS = tuple(round(0.50 + index * 0.05, 2) for index in range(10))
 
 
 class HarnessFailure(RuntimeError):
@@ -412,6 +413,51 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {"positive_by_band": positive_by_band, "negative_by_band": negative_by_band}
 
 
+def _threshold_curve(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Characterize the recorded scores without changing the live threshold."""
+
+    positive_bands = ("direct_override", "role_play_framing", "encoding_obfuscation", "multi_step_setup")
+    negative_bands = ("ordinary_text", "adjacent_vocabulary", "structurally_awkward")
+    curve: list[dict[str, Any]] = []
+    for threshold in CHARACTERIZATION_THRESHOLDS:
+        positive_by_band: dict[str, dict[str, int]] = {}
+        negative_by_band: dict[str, dict[str, int]] = {}
+        for band in positive_bands:
+            band_results = [result for result in results if result["band"] == band]
+            tp = sum(result["detector_score"] >= threshold for result in band_results)
+            positive_by_band[band] = {
+                "tp": tp,
+                "fn": len(band_results) - tp,
+                "total": len(band_results),
+            }
+        for band in negative_bands:
+            band_results = [result for result in results if result["band"] == band]
+            fp = sum(result["detector_score"] >= threshold for result in band_results)
+            negative_by_band[band] = {
+                "fp": fp,
+                "tn": len(band_results) - fp,
+                "total": len(band_results),
+            }
+        curve.append(
+            {
+                "threshold": threshold,
+                "positive_by_band": positive_by_band,
+                "negative_by_band": negative_by_band,
+                "positive_total": {
+                    "tp": sum(band["tp"] for band in positive_by_band.values()),
+                    "fn": sum(band["fn"] for band in positive_by_band.values()),
+                    "total": sum(band["total"] for band in positive_by_band.values()),
+                },
+                "negative_total": {
+                    "fp": sum(band["fp"] for band in negative_by_band.values()),
+                    "tn": sum(band["tn"] for band in negative_by_band.values()),
+                    "total": sum(band["total"] for band in negative_by_band.values()),
+                },
+            }
+        )
+    return curve
+
+
 async def run_harness(
     *,
     runtime: HarnessRuntime | None = None,
@@ -441,6 +487,7 @@ async def run_harness(
     ]
     summary = _summary(results)
     summary["case_mismatches"] = case_mismatches
+    summary["threshold_curve"] = _threshold_curve(results)
     return {
         "version": 1,
         "status": "complete",
@@ -463,6 +510,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", type=Path, default=CORPUS_PATH)
     parser.add_argument("--controls", type=Path, default=CONTROLS_PATH)
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="write the complete JSON envelope, including every raw score, to this path",
+    )
     return parser.parse_args(argv)
 
 
@@ -482,7 +534,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
-    print(json.dumps(envelope, ensure_ascii=False, indent=2, sort_keys=True))
+    rendered = json.dumps(envelope, ensure_ascii=False, indent=2, sort_keys=True)
+    if args.output is not None:
+        try:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"HARNESS FAILURE: cannot write output {args.output}: {exc}", file=sys.stderr)
+            return 2
+    print(rendered)
     return 0
 
 
