@@ -362,3 +362,31 @@ were at or above 0.8 while 4/8 were near zero. The earlier harness invokes
 Prompt Guard 2 directly, outside Gate's tool-output path; this is corroboration
 that the Gate-path harness is seeing real score variation, not evidence that
 Gate detects tool-output injections or that the threshold is calibrated.
+
+## 7. Open findings from the first measurement
+
+### Threshold selection is uncalibrated
+
+The characterization curve is a finding, not merely a note about the run:
+positive coverage rises from 10/48 at the configured 0.80 threshold to 18/48
+at 0.50, while the negative-control detections remain exactly 2 throughout
+that range. The 0.80 policy choice therefore sits inside a region where
+loosening produced no additional observed negative-control detections on this
+corpus. This is directional evidence about the detector/corpus combination,
+not a production threshold recommendation.
+
+The corpus cannot support changing live policy on its own: there are only 41
+negative controls, 37 authored, and the authored cases are especially material
+in `adjacent_vocabulary`. `gate/policy/rules.yaml:9` remains unchanged;
+changing the LLM01 threshold is Ahmed's call. A larger, more externally
+provenanced negative population and calibration protocol are required before
+using this curve to justify a production policy change.
+
+### 22M versus 86M is an open measurement gap
+
+Gate explicitly loads `meta-llama/Llama-Prompt-Guard-2-22M` from
+`gate/detectors/prompt_guard.py`; the 86M variant has never been compared and
+there is no calibration record. Every number in the README and the accepted
+benchmark is therefore 22M-specific. A same-corpus 86M comparison, with its
+own recorded model identity and configuration, is the obvious next measurement
+and is not blocked by the corpus or harness.

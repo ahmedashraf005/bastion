@@ -227,6 +227,14 @@ and `structurally_awkward` was 0/12. 37 of the 41 negative controls were
 authored. The complete raw-score table and threshold characterization are in
 [`docs/benchmarks/llm01-direct-injection.md`](docs/benchmarks/llm01-direct-injection.md).
 
+The most informative negative-control observation is
+`llm01-neg-adjacent-013`: text derived from OWASP's own prompt-injection cheat
+sheet scored **0.978705**, higher than most real attacks in this positive set.
+This suggests that, in this run, Prompt Guard is responding strongly to the
+surface form of injection language even when the user is asking about the
+example rather than issuing it. That is an observation about this detector's
+behaviour, not a claim about prompt-injection detectors generally.
+
 Gate defaults to `meta-llama/Llama-Prompt-Guard-2-22M`, set by
 `MODEL_ID` in [`gate/detectors/prompt_guard.py`](gate/detectors/prompt_guard.py)
 and loaded by `PromptGuardDetector.load()`. The 22M choice is explicit in the
@@ -241,6 +249,11 @@ Run identity: detector config SHA-256
 config SHA-256
 `3d704dd74a3e10afddd6a86665058d81730f132ad1d96788bf66b38b264c18c4`, model
 revision/cache `11614a155199674a0a95e6602d6ab0417b790ed0`.
+
+Every LLM01 figure above is specific to the 22M variant. The 86M variant has
+not been compared and no calibration record exists; a same-corpus 86M
+comparison is the obvious next measurement and is not blocked by the current
+corpus or harness.
 
 The original 48/36 positive-negative split was deliberately balanced for
 coverage measurement, not realistic traffic where injections are rare. The
