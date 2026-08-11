@@ -1,8 +1,9 @@
 # LLM01 direct-injection corpus and measurement harness
 
-Design record. The fixed corpus is in
-`tests/corpus/llm01_direct_injection.yaml`; harness implementation is not
-included in this pass.
+Design record. The fixed corpus and harness implementation are in
+`tests/corpus/llm01_direct_injection.yaml`,
+`tests/fixtures/llm01_controls.yaml`, and
+`tests/regression/llm01_injection_harness.py`.
 
 ## 1. Scope
 
@@ -165,16 +166,15 @@ does not mean verbatim: every adaptation records its source URL and what was
 changed. The authored minority remains separately identifiable and must be
 reported with any result.
 
-## 4. Planned file layout
+## 4. File layout
 
-The completed implementation now has the fixed corpus plus the following
-harness files to add or complete:
+The fixed corpus and harness implementation now include:
 
 ```text
 tests/corpus/llm01_direct_injection.yaml
 tests/fixtures/llm01_controls.yaml
 tests/regression/llm01_injection_harness.py
-tests/regression/test_llm01_direct_injection_corpus.py
+tests/regression/test_llm01_injection_harness.py
 docs/benchmarks/llm01-direct-injection.md
 ```
 

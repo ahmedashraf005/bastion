@@ -26,6 +26,7 @@ from detectors.presidio_pii import PresidioPiiDetector
 from detectors.prompt_guard import PromptGuardDetector
 from detectors.system_prompt_leak import MarkerReferenceResolver, SystemPromptLeakDetector
 from policy.engine import PolicyEngine
+from policy.models import PolicyEvaluation
 
 
 logging.basicConfig(
@@ -270,6 +271,79 @@ def extract_text_content(content: Any) -> str:
                 parts.append(text)
         return "\n".join(parts)
     return ""
+
+
+@dataclass(frozen=True)
+class InputEvaluation:
+    """The complete input-side detector and policy result for one request."""
+
+    latest_user_message: dict[str, Any] | None
+    latest_tool_message: dict[str, Any] | None
+    signals: list[DetectorSignal]
+    policy_result: PolicyEvaluation
+
+
+async def evaluate_input_request(
+    body: dict[str, Any],
+    *,
+    prompt_guard_detector: PromptGuardDetector | None,
+    pii_detector: PresidioPiiDetector,
+    policy_engine: PolicyEngine,
+    scan_tool_output: bool,
+) -> InputEvaluation:
+    """Run Gate's input detectors and input policy for a request body.
+
+    The HTTP route and the LLM01 corpus harness both use this function. Keeping
+    message selection, text extraction, signal assembly, and policy evaluation
+    here prevents a measurement harness from accidentally becoming a second,
+    subtly different detector path.
+    """
+
+    latest_user_message = most_recent_user_message(body)
+    if latest_user_message is None:
+        user_pii_signal = DetectorSignal(detector="presidio_pii", source_role="user")
+    else:
+        user_text = extract_text_content(latest_user_message.get("content"))
+        user_pii_signal = (await pii_detector.scan(user_text)).model_copy(
+            update={"source_role": "user"}
+        )
+
+    latest_tool_message = None
+    tool_pii_signal = None
+    if scan_tool_output:
+        latest_tool_message = most_recent_tool_message(body)
+        if latest_tool_message is None:
+            tool_pii_signal = DetectorSignal(detector="presidio_pii", source_role="tool")
+        else:
+            tool_text = extract_text_content(latest_tool_message.get("content"))
+            tool_pii_signal = (await pii_detector.scan(tool_text)).model_copy(
+                update={"source_role": "tool"}
+            )
+
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        raise ValueError("request body messages must be a list")
+    user_content = "\n".join(
+        extract_text_content(message.get("content"))
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+    detector_signal = (
+        await prompt_guard_detector.scan(user_content)
+        if prompt_guard_detector is not None
+        else DetectorSignal(detector="prompt_guard_2", injection_score=None)
+    ).model_copy(update={"source_role": "user"})
+
+    input_signals = [detector_signal, user_pii_signal]
+    if tool_pii_signal is not None:
+        input_signals.append(tool_pii_signal)
+    policy_result = policy_engine.evaluate(input_signals, stage="input")
+    return InputEvaluation(
+        latest_user_message=latest_user_message,
+        latest_tool_message=latest_tool_message,
+        signals=input_signals,
+        policy_result=policy_result,
+    )
 
 
 @asynccontextmanager
@@ -730,51 +804,18 @@ async def chat_completions(request: Request) -> Response:
     stream_requested = body.get("stream") is True
     started_at = perf_counter()
 
-    pii_detector: PresidioPiiDetector = request.app.state.presidio_pii_detector
-
-    latest_user_message = most_recent_user_message(body)
-    if latest_user_message is None:
-        user_pii_signal = DetectorSignal(detector="presidio_pii", source_role="user")
-    else:
-        user_text = extract_text_content(latest_user_message.get("content"))
-        user_pii_signal = (await pii_detector.scan(user_text)).model_copy(
-            update={"source_role": "user"}
-        )
-
-    # Tool-output scanning is opt-in and default off (settings.scan_tool_output):
-    # false-positive behavior of Presidio over structured tool content (JSON,
-    # transaction records) is unmeasured. When off, this behaves exactly as
-    # before this feature existed — no tool message is looked up or scanned.
-    latest_tool_message = None
-    tool_pii_signal = None
-    if settings.scan_tool_output:
-        latest_tool_message = most_recent_tool_message(body)
-        if latest_tool_message is None:
-            tool_pii_signal = DetectorSignal(detector="presidio_pii", source_role="tool")
-        else:
-            tool_text = extract_text_content(latest_tool_message.get("content"))
-            tool_pii_signal = (await pii_detector.scan(tool_text)).model_copy(
-                update={"source_role": "tool"}
-            )
-
-    user_content = "\n".join(
-        extract_text_content(message.get("content"))
-        for message in body.get("messages", [])
-        if isinstance(message, dict) and message.get("role") == "user"
+    input_evaluation = await evaluate_input_request(
+        body,
+        prompt_guard_detector=request.app.state.prompt_guard_detector,
+        pii_detector=request.app.state.presidio_pii_detector,
+        policy_engine=request.app.state.policy_engine,
+        scan_tool_output=settings.scan_tool_output,
     )
-    prompt_guard_detector: PromptGuardDetector | None = request.app.state.prompt_guard_detector
-    detector_signal = (
-        await prompt_guard_detector.scan(user_content)
-        if prompt_guard_detector is not None
-        else DetectorSignal(detector="prompt_guard_2", injection_score=None)
-    ).model_copy(update={"source_role": "user"})
-
-    input_signals = [detector_signal, user_pii_signal]
-    if tool_pii_signal is not None:
-        input_signals.append(tool_pii_signal)
+    latest_user_message = input_evaluation.latest_user_message
+    latest_tool_message = input_evaluation.latest_tool_message
+    input_signals = input_evaluation.signals
     detector_signals = [signal.model_dump(mode="json") for signal in input_signals]
-    policy_engine: PolicyEngine = request.app.state.policy_engine
-    policy_result = policy_engine.evaluate(input_signals, stage="input")
+    policy_result = input_evaluation.policy_result
     matched_rules = policy_result.matched_rules or None
 
     if policy_result.action == "block":

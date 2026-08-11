@@ -25,6 +25,23 @@ class PromptGuardDetector:
         self._model = model
         self._malicious_index = malicious_index
 
+    @property
+    def model_id(self) -> str:
+        """Return the approved model identifier used by this detector."""
+
+        return MODEL_ID
+
+    @property
+    def model_revision_or_cache_id(self) -> str:
+        """Return a revision when available, otherwise the loaded model path."""
+
+        config = getattr(self._model, "config", None)
+        revision = getattr(config, "_commit_hash", None)
+        if isinstance(revision, str) and revision:
+            return revision
+        model_path = getattr(self._model, "name_or_path", None)
+        return str(model_path or MODEL_ID)
+
     @classmethod
     def load(cls) -> "PromptGuardDetector":
         """Download and initialize the approved model once for this process."""
