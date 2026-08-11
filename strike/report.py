@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from strike.app.config import settings
 from strike.app.database import attempts, campaigns, findings
+from strike.app.success_contract import resolve_marker_ref
+from strike.marker_redaction import replace_markers
 
 NEAR_MISS_EXPLANATION = (
     "A near-miss means a marker-shaped candidate appeared near the expected "
@@ -101,6 +103,8 @@ EXACT_POSITIONAL_OVERLAP_NOTE = (
     "itself — a boundary intentionally kept inside the success contract, "
     "not duplicated into reporting code."
 )
+
+REPORT_REDACTION_FALLBACK = "[REDACTED: configured value unavailable]"
 
 REMEDIATION_NOTE = (
     "Bastion does not synthesize or apply Gate detection rules automatically. "
@@ -206,6 +210,7 @@ class Finding:
     matched_pattern: str
     gate_request_id: str | None
     sanitized: bool
+    report_redaction_applied: bool
     remediation: Remediation
     severity_note: str = SEVERITY_NOTE
 
@@ -284,6 +289,44 @@ def _remediation_for_finding(owasp_id: str, matched_pattern: str) -> Remediation
     )
 
 
+def _marker_values_for_reference(matched_pattern: str) -> frozenset[str]:
+    """Resolve only the reviewed marker value needed for report redaction."""
+
+    try:
+        return frozenset({resolve_marker_ref(matched_pattern).value})
+    except ValueError:
+        # A future finding class may not use a success-contract marker_ref.
+        # Callers fail closed for the target reply rather than emit evidence
+        # that could contain an unredactable secret.
+        return frozenset()
+
+
+def _redact_attack_turns(value: object, marker_values: frozenset[str]) -> object:
+    """Redact marker values while preserving the attack-turn JSON shape."""
+
+    if isinstance(value, str):
+        return replace_markers(value, marker_values) if marker_values else value
+    if isinstance(value, list):
+        return [_redact_attack_turns(item, marker_values) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _redact_attack_turns(item, marker_values)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _redact_target_reply(value: str, marker_values: frozenset[str]) -> tuple[str, bool]:
+    """Redact the target evidence, failing closed if its marker is unavailable."""
+
+    if not marker_values:
+        return REPORT_REDACTION_FALLBACK, True
+    redacted = replace_markers(value, marker_values)
+    if redacted == value:
+        return REPORT_REDACTION_FALLBACK, True
+    return redacted, True
+
+
 def build_report(
     campaign_row: dict,
     attempt_rows: list[dict],
@@ -337,13 +380,17 @@ def build_report(
     for row in finding_rows:
         finding_id = str(row["id"])
         matched_pattern = row["matched_pattern"]
+        marker_values = _marker_values_for_reference(matched_pattern)
+        redacted_target_reply, report_redaction_applied = _redact_target_reply(
+            row["target_reply"], marker_values
+        )
         finding_records.append(
             Finding(
                 finding_id=finding_id,
                 owasp_id=row["owasp_id"],
                 found_at=_isoformat(row.get("found_at")),
-                attack_turns=row["attack_turns"],
-                target_reply=row["target_reply"],
+                attack_turns=_redact_attack_turns(row["attack_turns"], marker_values),
+                target_reply=redacted_target_reply,
                 matched_pattern=matched_pattern,
                 gate_request_id=(
                     str(row["gate_request_id"])
@@ -351,6 +398,7 @@ def build_report(
                     else None
                 ),
                 sanitized=bool(row.get("sanitized")),
+                report_redaction_applied=report_redaction_applied,
                 remediation=_remediation_for_finding(
                     row["owasp_id"], matched_pattern
                 ),
@@ -466,9 +514,16 @@ def render_text(report: Report) -> str:
             lines.append(f"    found_at:        {finding.found_at}")
             lines.append(f"    matched_pattern: {finding.matched_pattern}")
             lines.append(f"    gate_request_id: {finding.gate_request_id or 'n/a'}")
-            lines.append(f"    target_reply:    {finding.target_reply}")
+            lines.append(
+                "    target_reply (report-redacted): "
+                f"{finding.target_reply}"
+            )
             lines.append(f"    attack_turns:    {json.dumps(finding.attack_turns)}")
-            lines.append(f"    sanitized:       {finding.sanitized}")
+            lines.append(f"    report_redaction_applied: {finding.report_redaction_applied}")
+            lines.append(
+                "    sanitized:       "
+                f"{finding.sanitized} (persistence-boundary sanitization; distinct from report redaction)"
+            )
             lines.append(f"    ({finding.severity_note})")
             lines.append("    Remediation:")
             lines.append(f"      template_id:              {finding.remediation.template_id}")

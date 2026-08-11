@@ -6,6 +6,17 @@ invoke Prompt Guard as a standalone score collector. The 0.8 policy threshold
 was left unchanged. Thresholds in the curve are characterization of these
 recorded scores, not tuning or a second measurement.
 
+## Harness-path incident note
+
+The later-discovered non-stream `chat_completions()` `policy_engine` binding
+bug does not affect this measurement. `tests/regression/llm01_injection_harness.py`
+sets `stream: False` in its request-shaped body but calls Gate's shared
+`evaluate_input_request()` directly from `execute_case()`; it does not invoke
+the HTTP route or its non-stream response-stage path. The LLM01 scores therefore
+measure the intended Prompt Guard input detector and input policy path. This
+does not excuse the shipped proxy bug: ordinary live non-stream requests did
+reach the broken route and were fixed separately.
+
 ## Run identity
 
 | Field | Value |
