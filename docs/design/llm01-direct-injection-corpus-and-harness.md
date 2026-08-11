@@ -1,8 +1,8 @@
 # LLM01 direct-injection corpus and measurement harness
 
-Design record. The negative-control tranche is authored separately in
-`tests/corpus/llm01_direct_injection.yaml`; positive cases and harness
-implementation are not included in this pass.
+Design record. The fixed corpus is in
+`tests/corpus/llm01_direct_injection.yaml`; harness implementation is not
+included in this pass.
 
 ## 1. Scope
 
@@ -50,28 +50,37 @@ reduced to a single isolated payload if the source case is multi-turn.
 
 ### Negative controls
 
-The negative set contains 36 cases, also evenly divided:
+The negative set contains 41 cases. `ordinary_text` and
+`structurally_awkward` remain at 12 cases each; five published-derived
+controls were added to `adjacent_vocabulary` after the original negative
+tranche was reviewed:
 
 | Band | Cases | Definition |
 |---|---:|---|
 | `ordinary_text` | 12 | Normal banking/support requests with no instruction override. |
-| `adjacent_vocabulary` | 12 | Benign text containing words such as “ignore,” “system,” “prompt,” “override,” or “instructions” in ordinary operational meanings. |
+| `adjacent_vocabulary` | 17 | Benign text containing words such as “ignore,” “system,” “prompt,” “override,” or “instructions” in ordinary operational meanings. |
 | `structurally_awkward` | 12 | Benign content with awkward formatting, nesting, escaping, Unicode, logs, or identifiers, mirroring the purpose of `benign.yaml` without copying its cases. |
 
-The resulting measured population is 84 cases: 48 labelled positives and
-36 negative controls. The equal positive-band sizes make the four attack
-shapes visible; the equal negative-band sizes prevent ordinary prose from
-swamping the vocabulary and structural controls. This is a deliberately
-bounded corpus, not a claim that 84 cases represent the universe of direct
-injection. The 48/36 positive-negative split is also deliberately balanced,
-not a realistic traffic base rate where injections are rare. Any resulting
-figure must be described as detection coverage across this defined positive
-set and its fixed controls; it must never be presented as expected
-production performance or a population-level rate.
+The resulting measured population is 89 cases: 48 labelled positives and 41
+negative controls. The equal positive-band sizes keep the four attack shapes
+visible; the negative bands are intentionally unequal because the
+adjacent-vocabulary band carries more discriminating power and now includes
+five externally sourced controls. This is a deliberately bounded corpus, not
+a claim that 89 cases represent the universe of direct injection.
+
+The original 48/36 positive-negative split was deliberately balanced for
+coverage measurement, not realistic traffic where injections are rare. The
+five sourced adjacent-vocabulary additions changed the final inventory to
+48/41 before any measurement. Any resulting figure must be described as
+detection coverage across this defined positive set and its fixed controls;
+it must never be presented as expected production performance or a
+population-level rate. Band composition is frozen from this point: a later
+band-count change requires a new corpus revision and may not be combined with
+a detector or threshold change.
 
 ### Operational sentinels
 
-Two frozen controls live outside the measured 84-case population in
+Two frozen controls live outside the measured 89-case population in
 `tests/fixtures/llm01_controls.yaml`:
 
 - `positive_control`: a canonical direct override that must cross the live
@@ -133,10 +142,29 @@ tuner may not later move a surprising case into a more convenient band.
 Corpus creation, detector changes, and threshold changes are separate
 commits so a result can be traced to the exact fixed population.
 
+### Current provenance limitation
+
+The original 36 negative controls are all `source_type: authored`. That is a
+documented deviation from the preference order above, not evidence that the
+negative set is representative. The cost is unequal by band: authored
+`ordinary_text` is a low-risk gap filler because mundane support text is
+mundane, while authored `adjacent_vocabulary` is materially weaker evidence.
+That band is intended to contain legitimate instruction-shaped language that
+a naive detector could plausibly mistake for an injection; when the same
+authoring process creates it, it primarily measures one person's model of
+what looks confusing. Five published-derived adjacent-vocabulary controls
+were added to reduce that weakness, but they do not erase the limitation.
+
+The positive tranche contains 36 published-derived adaptations and 12
+explicitly authored gap-fillers, three in each positive band. Published-derived
+does not mean verbatim: every adaptation records its source URL and what was
+changed. The authored minority remains separately identifiable and must be
+reported with any result.
+
 ## 4. Planned file layout
 
-The current pass adds only the negative authoring tranche. The completed
-implementation should add or complete:
+The completed implementation now has the fixed corpus plus the following
+harness files to add or complete:
 
 ```text
 tests/corpus/llm01_direct_injection.yaml
@@ -296,6 +324,12 @@ It cannot measure:
 - a population-level recall or false-positive guarantee;
 - the validity of the threshold beyond this frozen corpus and its stated
   bands.
+- a realistic production base rate: the corpus deliberately over-samples
+  injections, so its positive coverage is not expected traffic performance;
+- a provenance-free estimate of benign traffic: 36 of the 41 negative
+  controls are authored, and the authored adjacent-vocabulary cases are the
+  most consequential limitation because they encode the author's own idea
+  of what a naive detector might confuse with an injection.
 
 The number will mean only: “on this fixed, provenance-traceable set of
 direct user-role cases, under this recorded Gate configuration, these bands
