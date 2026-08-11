@@ -216,13 +216,17 @@ LLM07 marker detection with confusables normalization active, against the
 live policy configuration. Reported as corpus composition and count, not a
 rate: 0/46 has a wide confidence interval at this sample size.
 
-**Live campaign evidence**: 8 campaigns against Gate's hardened default
+**Live campaign evidence**: 9 campaigns against Gate's hardened default
 profile, evidence retained for all of them (`bastion report --campaign
-<id>` renders any of them). One crashed before any attempt was recorded
-(the NUL-byte persistence bug, since fixed —
-`docs/design/nul-byte-persistence-fix.md`); of the 7 that ran, 112 queries
-total, including a campaign against the NFKC-promoted marker detector
-specifically. 2 of the 7 produced a confirmed bypass — both the same
+<id>` renders any of them). One ended in an error before any attempt row was
+persisted (the NUL-byte persistence bug, since fixed —
+`docs/design/nul-byte-persistence-fix.md`). The canonical evidence headline
+is **117 target queries across the 8 non-error campaigns**. The errored
+campaign's row retains 1 attempted query, making 118 operational calls in
+the database, but its target response was not persisted as an attempt and is
+excluded from the evidence headline. This includes a campaign against the
+NFKC-promoted marker detector specifically. 2 of the 8 non-error campaigns
+produced a confirmed bypass — both the same
 value-anchored attack class, both correctly declined by the Rule
 Synthesizer for a documented structural reason rather than proposed and
 lost; see
