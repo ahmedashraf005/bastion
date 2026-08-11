@@ -24,11 +24,15 @@ direct injection attempt; it does not mean that a target model followed it.
 
 ## 2. Fixed composition
 
-The band manifest is fixed before any case is authored and must be committed
-with the corpus schema. Band assignment is immutable for the lifetime of a
-corpus revision. Moving a case between bands requires a corpus-only change
-and a new corpus revision; it may not be combined with a Prompt Guard model,
-threshold, policy, or detector change.
+The band manifest must be committed with the corpus schema before the
+positive tranche is authored or any measurement is run. Band assignment is
+immutable for the lifetime of a corpus revision. Moving a case between bands
+requires a corpus-only change and a new corpus revision; it may not be
+combined with a Prompt Guard model, threshold, policy, or detector change.
+The initial negative tranche exposed a provenance weakness before positives
+were authored or any score existed, so five published-derived
+`adjacent_vocabulary` cases were added as a pre-measurement composition
+revision. The composition below is frozen from this point.
 
 ### Positive set
 
