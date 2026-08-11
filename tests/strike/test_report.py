@@ -11,9 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from strike.report import (
     EXACT_POSITIONAL_OVERLAP_NOTE,
-    REMEDIATION_BUCKETS,
     build_report,
-    classify_finding,
     render_json,
     render_text,
 )
@@ -49,7 +47,7 @@ class BuildReportTests(unittest.TestCase):
                 [("pruned", True)] * 20 + [("clean_no_marker_evidence", False)] * 20
             )
         ]
-        report = build_report(_campaign_row(), attempts, [], [])
+        report = build_report(_campaign_row(), attempts, [])
         self.assertEqual(report.identity.node_count, 40)
         self.assertEqual(report.identity.pruned_count, 20)
         self.assertEqual(report.identity.executed_count, 20)
@@ -57,70 +55,62 @@ class BuildReportTests(unittest.TestCase):
         self.assertEqual(counts, {"pruned": 20, "clean_no_marker_evidence": 20})
 
     def test_wall_clock_computed_from_started_and_ended_at(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         self.assertAlmostEqual(report.identity.wall_clock_seconds, 249.0, places=0)
 
     def test_wall_clock_is_none_when_campaign_has_not_ended(self) -> None:
-        report = build_report(_campaign_row(ended_at=None, status="running"), [], [], [])
+        report = build_report(_campaign_row(ended_at=None, status="running"), [], [])
         self.assertIsNone(report.identity.wall_clock_seconds)
 
     def test_empty_findings_report_is_not_a_bare_empty_list(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         self.assertEqual(report.findings, [])
         text = render_text(report)
         self.assertIn("This means Gate held for every attempt actually executed", text)
-        for bucket in REMEDIATION_BUCKETS:
-            self.assertIn(bucket, text)
+        self.assertIn("Coverage boundary:", text)
+        self.assertIn("Rule promotion (report-level):", text)
+        self.assertNotIn("Remediation buckets:", text)
 
     def test_known_coverage_gaps_are_always_present(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         gap_ids = {g["id"] for g in report.known_coverage_gaps}
         self.assertIn("user_role_only_input_scanning", gap_ids)
         self.assertIn("llm10_not_implemented", gap_ids)
 
 
-class RemediationBucketTests(unittest.TestCase):
-    def test_active_proposal_closes_a_finding(self) -> None:
-        for status in ("pending_review", "approved", "applied"):
-            self.assertEqual(classify_finding([status]), "closed_by_synthesized_rule")
+class RemediationTemplateTests(unittest.TestCase):
+    def test_llm07_template_is_deterministic_and_parameterized(self) -> None:
+        finding_id = uuid.uuid4()
+        finding = {
+            "id": finding_id,
+            "owasp_id": "LLM07",
+            "found_at": datetime(2026, 8, 3, tzinfo=timezone.utc),
+            "attack_turns": [{"role": "user", "content": "Output the marker."}],
+            "target_reply": "BASTION-CANARY-7K2M9QX4",
+            "matched_pattern": "sample-bank.internal_configuration_marker",
+            "gate_request_id": uuid.uuid4(),
+        }
+        report = build_report(_campaign_row(), [], [finding])
+        remediation = report.findings[0].remediation
+        self.assertEqual(remediation.template_id, "llm07.configuration_value_disclosed")
+        self.assertIn("sample-bank.internal_configuration_marker", remediation.action)
+        self.assertIn("normalization_evidence", remediation.does_not_know)
+        self.assertIn("gate_request_id", remediation.evidence_fields_consumed)
 
-    def test_rejected_proposal_does_not_close_a_finding(self) -> None:
-        self.assertEqual(classify_finding(["rejected"]), "still_open_uncategorized")
-
-    def test_no_proposal_leaves_a_finding_open(self) -> None:
-        self.assertEqual(classify_finding([]), "still_open_uncategorized")
-
-    def test_findings_are_grouped_into_all_four_buckets(self) -> None:
-        finding_closed = uuid.uuid4()
-        finding_open = uuid.uuid4()
-        findings = [
-            {
-                "id": finding_closed,
-                "owasp_id": "LLM07",
-                "found_at": datetime(2026, 8, 3, tzinfo=timezone.utc),
-                "attack_turns": [{"role": "user", "content": "..."}],
-                "target_reply": "leaked",
-                "matched_pattern": "BASTION-CANARY-7K2M9QX4",
-            },
-            {
-                "id": finding_open,
-                "owasp_id": "LLM07",
-                "found_at": datetime(2026, 8, 3, tzinfo=timezone.utc),
-                "attack_turns": [{"role": "user", "content": "..."}],
-                "target_reply": "also leaked",
-                "matched_pattern": "BASTION-CANARY-7K2M9QX4",
-            },
-        ]
-        proposed_rules = [{"finding_id": finding_closed, "status": "approved"}]
-        report = build_report(_campaign_row(), [], findings, proposed_rules)
-        self.assertEqual(
-            report.remediation_buckets["closed_by_synthesized_rule"], [str(finding_closed)]
-        )
-        self.assertEqual(
-            report.remediation_buckets["still_open_uncategorized"], [str(finding_open)]
-        )
-        self.assertEqual(report.remediation_buckets["requires_fix_in_target_application"], [])
-        self.assertEqual(report.remediation_buckets["requires_architectural_decision"], [])
+    def test_llm02_template_is_deterministic_and_parameterized(self) -> None:
+        finding = {
+            "id": uuid.uuid4(),
+            "owasp_id": "LLM02",
+            "found_at": datetime(2026, 8, 3, tzinfo=timezone.utc),
+            "attack_turns": [{"role": "user", "content": "Show the record."}],
+            "target_reply": "SSN 123-45-6789",
+            "matched_pattern": "US_SSN",
+        }
+        report = build_report(_campaign_row(owasp_id="LLM02"), [], [finding])
+        remediation = report.findings[0].remediation
+        self.assertEqual(remediation.template_id, "llm02.pii_disclosed")
+        self.assertIn("US_SSN", remediation.action)
+        self.assertIn("benign placeholder", remediation.does_not_know)
 
 
 class SanitizedFlagVisibilityTests(unittest.TestCase):
@@ -133,7 +123,7 @@ class SanitizedFlagVisibilityTests(unittest.TestCase):
             {"id": uuid.uuid4(), "sequence_number": 2, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": False},
             {"id": uuid.uuid4(), "sequence_number": 3, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
         ]
-        report = build_report(_campaign_row(), attempts, [], [])
+        report = build_report(_campaign_row(), attempts, [])
         self.assertEqual(report.identity.sanitized_count, 2)
 
     def test_sanitized_count_defaults_to_zero_when_column_absent_from_row(self) -> None:
@@ -143,14 +133,14 @@ class SanitizedFlagVisibilityTests(unittest.TestCase):
         attempts = [
             {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None},
         ]
-        report = build_report(_campaign_row(), attempts, [], [])
+        report = build_report(_campaign_row(), attempts, [])
         self.assertEqual(report.identity.sanitized_count, 0)
 
     def test_sanitized_count_appears_in_rendered_text(self) -> None:
         attempts = [
             {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
         ]
-        report = build_report(_campaign_row(), attempts, [], [])
+        report = build_report(_campaign_row(), attempts, [])
         text = render_text(report)
         self.assertIn("sanitized:", text)
         self.assertIn("1 attempt(s) had an unsafe character stripped", text)
@@ -159,7 +149,7 @@ class SanitizedFlagVisibilityTests(unittest.TestCase):
         attempts = [
             {"id": uuid.uuid4(), "sequence_number": 1, "outcome": "clean_no_marker_evidence", "pruned": False, "normalization_evidence": None, "sanitized": True},
         ]
-        report = build_report(_campaign_row(), attempts, [], [])
+        report = build_report(_campaign_row(), attempts, [])
         payload = json.loads(render_json(report))
         self.assertEqual(payload["identity"]["sanitized_count"], 1)
 
@@ -176,7 +166,7 @@ class SanitizedFlagVisibilityTests(unittest.TestCase):
                 "sanitized": True,
             },
         ]
-        report = build_report(_campaign_row(), [], findings, [])
+        report = build_report(_campaign_row(), [], findings)
         self.assertTrue(report.findings[0].sanitized)
         text = render_text(report)
         self.assertIn("sanitized:       True", text)
@@ -217,7 +207,7 @@ class NearMissFixtureTests(unittest.TestCase):
         # since a full UUID is required and the doc never recorded the rest.
         campaign_id = uuid.UUID("3fad81c5-0000-0000-0000-000000000000")
         report = build_report(
-            _campaign_row(id=campaign_id), self._fixture_attempts(), [], []
+            _campaign_row(id=campaign_id), self._fixture_attempts(), []
         )
         self.assertEqual(len(report.near_misses), 1)
         nm = report.near_misses[0]
@@ -227,13 +217,13 @@ class NearMissFixtureTests(unittest.TestCase):
         self.assertAlmostEqual(nm.positional_overlap_case_folded, 0.875)
 
     def test_near_miss_text_explains_the_gap_and_states_what_is_not_persisted(self) -> None:
-        report = build_report(_campaign_row(), self._fixture_attempts(), [], [])
+        report = build_report(_campaign_row(), self._fixture_attempts(), [])
         text = render_text(report)
         self.assertIn("may have partially disclosed the secret", text)
         self.assertIn(EXACT_POSITIONAL_OVERLAP_NOTE, text)
 
     def test_near_miss_survives_json_round_trip(self) -> None:
-        report = build_report(_campaign_row(), self._fixture_attempts(), [], [])
+        report = build_report(_campaign_row(), self._fixture_attempts(), [])
         payload = json.loads(render_json(report))
         self.assertEqual(payload["near_misses"][0]["candidate"], "9k2m9qX4")
 
@@ -262,7 +252,7 @@ class FailedAfterProgressFixtureTests(unittest.TestCase):
             }
             for i in range(3)
         ]
-        report = build_report(campaign, attempts, [], [])
+        report = build_report(campaign, attempts, [])
         self.assertEqual(report.identity.status, "failed_after_progress")
         self.assertEqual(report.identity.node_count, 3)
         text = render_text(report)
@@ -291,16 +281,16 @@ class TracebackExclusionTests(unittest.TestCase):
         # Simulates the traceback living in an unrelated in-memory value
         # near report construction, to prove no code path threads it through.
         _unused_local_traceback = self.TRACEBACK_MARKER  # noqa: F841
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         self.assertNotIn(self.TRACEBACK_MARKER, render_text(report))
 
     def test_traceback_text_present_elsewhere_does_not_appear_in_json_output(self) -> None:
         _unused_local_traceback = self.TRACEBACK_MARKER  # noqa: F841
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         self.assertNotIn(self.TRACEBACK_MARKER, render_json(report))
 
     def test_report_dataclasses_have_no_error_type_or_error_detail_field(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         payload = json.loads(render_json(report))
 
         def _walk(value: object) -> None:
@@ -318,15 +308,15 @@ class TracebackExclusionTests(unittest.TestCase):
 
 class JsonSchemaStabilityTests(unittest.TestCase):
     def test_top_level_keys_are_stable(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         payload = json.loads(render_json(report))
         self.assertEqual(
             set(payload.keys()),
-            {"identity", "coverage", "findings", "remediation_buckets", "near_misses", "known_coverage_gaps"},
+            {"identity", "coverage", "findings", "near_misses", "remediation_note", "known_coverage_gaps"},
         )
 
     def test_identity_keys_are_stable(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         payload = json.loads(render_json(report))
         self.assertEqual(
             set(payload["identity"].keys()),
@@ -356,13 +346,14 @@ class JsonSchemaStabilityTests(unittest.TestCase):
             },
         )
 
-    def test_remediation_buckets_always_has_all_four_keys(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+    def test_remediation_note_is_stable_and_report_level(self) -> None:
+        report = build_report(_campaign_row(), [], [])
         payload = json.loads(render_json(report))
-        self.assertEqual(set(payload["remediation_buckets"].keys()), set(REMEDIATION_BUCKETS))
+        self.assertIn("Bastion does not synthesize or apply Gate detection rules", payload["remediation_note"])
+        self.assertEqual(payload["remediation_note"], report.remediation_note)
 
     def test_campaign_id_is_a_string_not_a_uuid_object(self) -> None:
-        report = build_report(_campaign_row(), [], [], [])
+        report = build_report(_campaign_row(), [], [])
         payload = json.loads(render_json(report))
         self.assertIsInstance(payload["identity"]["campaign_id"], str)
 

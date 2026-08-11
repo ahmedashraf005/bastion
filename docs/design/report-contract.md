@@ -1,8 +1,9 @@
 # `bastion report`'s contract: app-level remediation, not rule promotion
 
-Design record for redefining `bastion report`'s primary output. Nothing in
-this document is implemented — no schema migration, no code change, no
-dashboard change. It specifies what a later implementation pass must build.
+Design record for redefining `bastion report`'s primary output. The report
+module implementation is now in place; this pass changes no database schema
+and no dashboard code. The missing `normalization_evidence` persistence
+described below remains a separate prerequisite for mechanism-level reporting.
 
 ## 0. The scope change, and why it's not a stopgap
 
@@ -307,23 +308,11 @@ evidence-backed call not to build it prematurely — which reads as maturity,
 not as an admission of missing scope, because it's framed as a decision with
 a linked design record behind it, not as a stub.
 
-The remaining remediation bucket set, revised for the app-level-only model:
-`requires_fix_in_target_application` (populated deterministically by the
-matching template above — the only bucket a real finding lands in today)
-and `still_open_uncategorized` (kept as a safety net for a finding class
-encountered without a matching template — should not fire in practice given
-§1's taxonomy is exhaustive against current judge capability, but the
-existing code's own reasoning for keeping an "uncategorized" fallback rather
-than raising still applies: a report must never crash on a shape it wasn't
-expecting). `requires_architectural_decision` is retired as a *separate
-triage bucket* — the substance it used to hold (the anchor-gate,
-structurally-unclosable framing) is finding-class-specific context that
-belongs inside the LLM07 template's "does not know" / action fields, not a
-parallel bucket a human has to move a finding into by hand. Nothing in the
-current schema populates it automatically anyway (`strike/report.py`'s own
-`classify_finding()` docstring already says so); folding its content into
-the template that actually needs it is a net reduction in unused structure,
-not a loss of information.
+The old per-finding remediation buckets are retired. A finding now carries
+only its evidence and the matching deterministic, hand-authored remediation
+template. The structurally-unclosable rule-promotion decision is represented
+once in the report-level note below, never as a per-finding state.
+
 
 ### The zero-findings report
 
@@ -432,10 +421,7 @@ not backfill the gap with a constant-value column in the meantime.
 │            parameterized with the marker reference above ]           │
 │  This report does not know: [ the fixed "does not know" text ]       │
 │                                                                       │
-│ ── Rule promotion ───────────────────────────────────────────────── │
-│  Bastion does not synthesize or apply a Gate detection rule for      │
-│  this finding. This is a deliberate scope decision, not a pending    │
-│  step — see docs/design/rule-vocabulary-and-promotion-gap.md.        │
+│  (The report-level rule-promotion note appears once after findings.)  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -448,10 +434,10 @@ amendment above — implicitly, as the mere presence of the `── Remediation
 ──` section itself, not as a separate labelled fact. It never needs its
 own "available: yes" line, since a finding without a matching template
 can't exist under this taxonomy (§1) — the section being there at all is
-the only signal required. The rule promotion note sits last, once per
-finding, small and matter-of-fact — not hidden, not emphasized, consistent
-with §3's decision to keep this information out of the primary
-remediation decision while not deleting it from the record entirely.
+the only signal required. The rule promotion note sits once at report level,
+small and matter-of-fact — not hidden, not emphasized, consistent with §3's
+decision to keep this information out of the primary remediation decision
+while not deleting it from the record entirely.
 
 ### Does the approve control still exist?
 
@@ -487,23 +473,16 @@ changes it.
 Already implemented, confirmed by reading the module in full:
 
 - `bastion report --campaign <uuid> [--format text|json]` exists and works.
-- Reads only Strike's own tables (`campaigns`, `attempts`, `findings`,
-  `proposed_rules`) — **never Gate's `requests_table`**, confirmed by the
+- Reads only Strike's own tables (`campaigns`, `attempts`, `findings`) —
+  **never Gate's `requests_table` or `proposed_rules`**, confirmed by the
   module's own docstring ("never touches Gate") and by the query set in
   `fetch_report()`. This matters for §1's class-1/class-3 asymmetry: Gate's
   own independent detection events for a campaign's traffic are invisible
   to this report even where they exist.
-- Already has a four-bucket `REMEDIATION_BUCKETS` constant
-  (`closed_by_synthesized_rule`, `requires_fix_in_target_application`,
-  `requires_architectural_decision`, `still_open_uncategorized`) — **not
-  three**, contrary to this task's framing of the original design as a
-  three-way split. `classify_finding()` can only auto-populate two of the
-  four (`closed_by_synthesized_rule` if an active `proposed_rules` status
-  exists — which, per §0, never happens in practice — else
-  `still_open_uncategorized`); the other two exist as labels "for a human
-  to move a finding into," per the function's own docstring, not for the
-  report to infer. §3's decision retires one bucket and folds another's
-  content into the template layer.
+- The old `REMEDIATION_BUCKETS` and `classify_finding()` per-finding
+  structure is retired. Findings now carry evidence plus a deterministic,
+  hand-authored remediation template; the rule-promotion decision is the
+  single `remediation_note` at report level.
 - Already has `CoverageOutcome` (the per-`AttemptOutcome` tally used
   throughout §3's zero-findings design) and `known_coverage_gaps` (the same
   four static entries this document leans on in §1/§3).
@@ -521,16 +500,12 @@ Already implemented, confirmed by reading the module in full:
   persisted — this document's templates inherit that same disclosure
   rather than inventing severity.
 
-**What contradicts this design, requiring a follow-up implementation pass**:
-the `closed_by_synthesized_rule` bucket and its `classify_finding()` logic
-are live code today, reachable in principle (if a `proposed_rules` row with
-an active status ever existed) — §3 requires this branch retired from the
-per-finding structure entirely, which is a real code change, not just a
-report-text change. The `Finding` dataclass and `findings` table need
-`normalization_evidence` (or an `attempt_id` FK plus a join) added before
-§2's LLM07 template can show *how* a value was disclosed — currently
-impossible without a schema change, correctly out of this document's scope
-(design only) but a hard prerequisite for full implementation.
+**What still requires a follow-up implementation pass**: the `Finding`
+dataclass and `findings` table need `normalization_evidence` (or an
+`attempt_id` FK plus a join) added before §2's LLM07 template can show *how*
+a value was disclosed — currently impossible without a schema change. The
+current report deliberately lists that missing evidence in `does_not_know`
+instead of inventing it or re-running detection.
 
 ### JSON shape — stable contract
 
@@ -551,8 +526,8 @@ names — a CI script can depend on these without checking for existence):
 - `findings` — a list, empty for a clean campaign (not null, not omitted —
   §3's zero-findings design depends on this being reliably an empty list a
   CI script can check `len() == 0` against without a null check first).
-- `known_coverage_gaps` — always the same four (soon: same content, still
-  static) entries, unconditionally present.
+- `known_coverage_gaps` — always the same four static entries,
+  unconditionally present.
 - `remediation_note` (new, per §3) — the fixed rule-promotion-scope text,
   unconditionally present, identical string on every report. A CI
   consumer that wants to assert "this tool doesn't silently promote rules"
@@ -569,9 +544,10 @@ non-empty as the actual gate signal):
 - `near_misses` — informational only; §3 does not change its status as
   "evidence a human should review," never a CI-blocking signal.
 - Each `finding.remediation` sub-object (§2's template output) — the
-  *fields* within it (`template_id`, `action`, `does_not_know`) are stable
-  once implemented, but the set of finding classes able to populate it
-  grows over time (§1/§2's four unreachable-today templates) — a consumer
+  current template fields (`template_id`, `trigger_condition`,
+  `evidence_fields_consumed`, `invariant_claim`, `action`, and
+  `does_not_know`) are stable for the classes implemented today, but the set
+  of finding classes able to populate it can grow over time — a consumer
   should key off `finding.owasp_id` plus `finding.remediation.template_id`,
   never assume every `owasp_id` maps to a template that existed when the
   consumer was written.

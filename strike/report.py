@@ -2,7 +2,7 @@
 
 This module never writes to the database and never touches Gate, Strike's
 detection path, or the success contract. It renders what campaign_terminal
-diagnostics and the attempts/findings/proposed_rules tables already record.
+diagnostics and the attempts/findings tables already record.
 
 error_type and error_detail on strike.campaigns are explicit local-dashboard
 diagnostics (see the column comment in strike/app/database.py) and must
@@ -24,21 +24,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from strike.app.config import settings
-from strike.app.database import attempts, campaigns, findings, proposed_rules
-
-
-# Bucket labels are always present in a report, even when empty, so the
-# structure is stable whether or not any bucket has been populated yet.
-REMEDIATION_BUCKETS = (
-    "closed_by_synthesized_rule",
-    "requires_fix_in_target_application",
-    "requires_architectural_decision",
-    "still_open_uncategorized",
-)
-
-# proposed_rules statuses that represent an active, non-abandoned proposal.
-# "rejected" does not close a finding — it returns it to still_open.
-ACTIVE_PROPOSAL_STATUSES = ("pending_review", "approved", "applied")
+from strike.app.database import attempts, campaigns, findings
 
 NEAR_MISS_EXPLANATION = (
     "A near-miss means a marker-shaped candidate appeared near the expected "
@@ -116,6 +102,51 @@ EXACT_POSITIONAL_OVERLAP_NOTE = (
     "not duplicated into reporting code."
 )
 
+REMEDIATION_NOTE = (
+    "Bastion does not synthesize or apply Gate detection rules automatically. "
+    "Both confirmed findings are structurally unclosable in the current rule "
+    "vocabulary; see docs/design/rule-vocabulary-and-promotion-gap.md. This "
+    "is a deliberate scope decision, not a per-finding remediation state."
+)
+
+LLM07_TRIGGER = "finding.owasp_id == 'LLM07'"
+LLM07_EVIDENCE_FIELDS = (
+    "attack_turns",
+    "target_reply",
+    "matched_pattern",
+    "gate_request_id",
+    "sanitized",
+)
+LLM07_INVARIANT = (
+    "The target emitted client-visible text that resolves, under the judge's "
+    "canonicalization, to a value Bastion was configured to treat as secret."
+)
+LLM07_DOES_NOT_KNOW = (
+    "The report does not know how the obfuscation worked; normalization_evidence "
+    "(steps_fired, matched_via, and matched_region_codepoints) is not persisted. "
+    "It also does not know whether this is the only sensitive value in the "
+    "application, whether other secrets were exposed, or whether output filtering "
+    "could fully close this class for this deployment."
+)
+
+LLM02_TRIGGER = "finding.owasp_id == 'LLM02'"
+LLM02_EVIDENCE_FIELDS = (
+    "attack_turns",
+    "target_reply",
+    "matched_pattern",
+    "gate_request_id",
+    "sanitized",
+)
+LLM02_INVARIANT = (
+    "Client-visible output contained information classified by the finding as "
+    "PII or sensitive information that the application should not disclose."
+)
+LLM02_DOES_NOT_KNOW = (
+    "The report does not know whether the matched value is genuinely sensitive "
+    "or a benign placeholder, whether the detector's entity classification is "
+    "correct, or whether other PII exists outside this evidence."
+)
+
 
 @dataclass
 class CampaignIdentity:
@@ -156,6 +187,16 @@ class CoverageOutcome:
 
 
 @dataclass
+class Remediation:
+    template_id: str
+    trigger_condition: str
+    evidence_fields_consumed: list[str]
+    invariant_claim: str
+    action: str
+    does_not_know: str
+
+
+@dataclass
 class Finding:
     finding_id: str
     owasp_id: str
@@ -163,9 +204,9 @@ class Finding:
     attack_turns: object
     target_reply: str
     matched_pattern: str
-    remediation_bucket: str
-    proposed_rule_statuses: list[str]
+    gate_request_id: str | None
     sanitized: bool
+    remediation: Remediation
     severity_note: str = SEVERITY_NOTE
 
 
@@ -185,8 +226,8 @@ class Report:
     identity: CampaignIdentity
     coverage: list[CoverageOutcome]
     findings: list[Finding]
-    remediation_buckets: dict[str, list[str]]
     near_misses: list[NearMiss]
+    remediation_note: str = REMEDIATION_NOTE
     known_coverage_gaps: list[dict] = field(
         default_factory=lambda: [dict(g) for g in KNOWN_COVERAGE_GAPS]
     )
@@ -196,28 +237,57 @@ def _isoformat(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-def classify_finding(proposal_statuses: list[str]) -> str:
-    """Assign the remediation bucket a finding falls into today.
+def _remediation_for_finding(owasp_id: str, matched_pattern: str) -> Remediation:
+    """Return a hand-authored remediation populated only from finding evidence."""
 
-    Only two of the four buckets can be populated automatically from what is
-    persisted: an active (non-rejected) proposed rule closes a finding;
-    everything else defaults to still_open_uncategorized. Nothing in the
-    current schema distinguishes "needs a fix in the user's own app" from
-    "needs an architectural anchor-change decision" on a confirmed finding —
-    those two buckets exist in the structure for a human to move a finding
-    into, not for this report to infer.
-    """
-
-    if any(status in ACTIVE_PROPOSAL_STATUSES for status in proposal_statuses):
-        return "closed_by_synthesized_rule"
-    return "still_open_uncategorized"
+    if owasp_id == "LLM07":
+        reference = matched_pattern or "the configured marker reference"
+        return Remediation(
+            template_id="llm07.configuration_value_disclosed",
+            trigger_condition=LLM07_TRIGGER,
+            evidence_fields_consumed=list(LLM07_EVIDENCE_FIELDS),
+            invariant_claim=LLM07_INVARIANT,
+            action=(
+                f"Treat the value referenced by {reference} as compromised and rotate it. "
+                "Do not rely on output filtering as the only control for values that "
+                "must never reach a client: the filter in front of this application "
+                "was bypassed. Keep values needed during model interaction out of "
+                "client-visible turns; use an out-of-band backend lookup keyed by an "
+                "opaque reference instead of placing the literal value in model-visible "
+                "context."
+            ),
+            does_not_know=LLM07_DOES_NOT_KNOW,
+        )
+    if owasp_id == "LLM02":
+        reference = matched_pattern or "the recorded PII match"
+        return Remediation(
+            template_id="llm02.pii_disclosed",
+            trigger_condition=LLM02_TRIGGER,
+            evidence_fields_consumed=list(LLM02_EVIDENCE_FIELDS),
+            invariant_claim=LLM02_INVARIANT,
+            action=(
+                f"Treat the disclosed data represented by {reference} as exposed. "
+                "Remove real PII from prompts, seeded conversation history, and "
+                "retrieved records before they reach model-visible context. If the "
+                "application must process it, redact or tokenize it before the model "
+                "can repeat it; do not rely on output-side filtering as the sole control."
+            ),
+            does_not_know=LLM02_DOES_NOT_KNOW,
+        )
+    return Remediation(
+        template_id="unrecognized.finding_class",
+        trigger_condition=f"finding.owasp_id == {owasp_id!r}",
+        evidence_fields_consumed=["attack_turns", "target_reply", "matched_pattern"],
+        invariant_claim="A confirmed finding exists, but its class is not in the current report taxonomy.",
+        action="Review the evidence manually and do not infer that a Gate rule or automatic fix exists.",
+        does_not_know="The current report has no hand-authored remediation template for this finding class.",
+    )
 
 
 def build_report(
     campaign_row: dict,
     attempt_rows: list[dict],
     finding_rows: list[dict],
-    proposed_rule_rows: list[dict],
 ) -> Report:
     """Assemble a Report from plain rows — no I/O, so this is unit-testable."""
 
@@ -263,17 +333,10 @@ def build_report(
         for outcome, count in sorted(outcome_counts.items())
     ]
 
-    proposals_by_finding: dict[str, list[str]] = {}
-    for row in proposed_rule_rows:
-        proposals_by_finding.setdefault(str(row["finding_id"]), []).append(row["status"])
-
-    buckets: dict[str, list[str]] = {bucket: [] for bucket in REMEDIATION_BUCKETS}
     finding_records: list[Finding] = []
     for row in finding_rows:
         finding_id = str(row["id"])
-        proposal_statuses = proposals_by_finding.get(finding_id, [])
-        bucket = classify_finding(proposal_statuses)
-        buckets[bucket].append(finding_id)
+        matched_pattern = row["matched_pattern"]
         finding_records.append(
             Finding(
                 finding_id=finding_id,
@@ -281,10 +344,16 @@ def build_report(
                 found_at=_isoformat(row.get("found_at")),
                 attack_turns=row["attack_turns"],
                 target_reply=row["target_reply"],
-                matched_pattern=row["matched_pattern"],
-                remediation_bucket=bucket,
-                proposed_rule_statuses=proposal_statuses,
+                matched_pattern=matched_pattern,
+                gate_request_id=(
+                    str(row["gate_request_id"])
+                    if row.get("gate_request_id") is not None
+                    else None
+                ),
                 sanitized=bool(row.get("sanitized")),
+                remediation=_remediation_for_finding(
+                    row["owasp_id"], matched_pattern
+                ),
             )
         )
 
@@ -306,13 +375,36 @@ def build_report(
         identity=identity,
         coverage=coverage,
         findings=finding_records,
-        remediation_buckets=buckets,
         near_misses=near_misses,
     )
 
 
 def render_json(report: Report) -> str:
+    """Render the stable report envelope with deterministic remediation text."""
+
     return json.dumps(asdict(report), indent=2, sort_keys=False, default=str)
+
+
+def _not_attempted_summary(identity: CampaignIdentity) -> str:
+    if identity.pruned_count:
+        return (
+            f"{identity.pruned_count} recorded node(s) were pruned by the "
+            "campaign search and were not executed."
+        )
+    if identity.queries_used >= identity.max_queries:
+        return (
+            f"No additional queries were attempted because the "
+            f"{identity.max_queries}-query budget was exhausted."
+        )
+    if identity.status in {"completed", "query_limit_reached"}:
+        return (
+            "No additional queries were attempted after the campaign ended; "
+            "the persisted campaign record does not claim unrecorded work."
+        )
+    return (
+        f"No additional attempts are recorded after campaign status "
+        f"{identity.status!r}; unrecorded work cannot be inferred."
+    )
 
 
 def render_text(report: Report) -> str:
@@ -339,6 +431,25 @@ def render_text(report: Report) -> str:
     lines.append(f"  gate pattern:        {i.gate_pattern_version_id or 'n/a'}")
     lines.append("")
 
+    lines.append("Coverage boundary:")
+    lines.append(
+        f"  attempted:           {i.executed_count} executed attempt(s) "
+        f"from {i.node_count} recorded node(s)"
+    )
+    if i.wall_clock_seconds is not None:
+        budget = (
+            f"{i.queries_used}/{i.max_queries} queries, "
+            f"{i.wall_clock_seconds:.3f}s/{i.max_wall_clock_seconds}s wall clock"
+        )
+    else:
+        budget = (
+            f"{i.queries_used}/{i.max_queries} queries, "
+            f"wall clock not ended/{i.max_wall_clock_seconds}s"
+        )
+    lines.append(f"  budget:              {budget}")
+    lines.append(f"  not attempted:       {_not_attempted_summary(i)}")
+    lines.append("")
+
     lines.append("Coverage (all attempts, including pruned):")
     if report.coverage:
         for outcome in report.coverage:
@@ -350,17 +461,25 @@ def render_text(report: Report) -> str:
     lines.append("Confirmed findings:")
     if report.findings:
         for finding in report.findings:
-            lines.append(f"  finding {finding.finding_id} [{finding.remediation_bucket}]")
+            lines.append(f"  finding {finding.finding_id}")
             lines.append(f"    owasp_id:        {finding.owasp_id}")
             lines.append(f"    found_at:        {finding.found_at}")
             lines.append(f"    matched_pattern: {finding.matched_pattern}")
+            lines.append(f"    gate_request_id: {finding.gate_request_id or 'n/a'}")
             lines.append(f"    target_reply:    {finding.target_reply}")
             lines.append(f"    attack_turns:    {json.dumps(finding.attack_turns)}")
             lines.append(f"    sanitized:       {finding.sanitized}")
-            lines.append(
-                f"    proposed_rules:  {finding.proposed_rule_statuses or '(none proposed)'}"
-            )
             lines.append(f"    ({finding.severity_note})")
+            lines.append("    Remediation:")
+            lines.append(f"      template_id:              {finding.remediation.template_id}")
+            lines.append(f"      trigger_condition:         {finding.remediation.trigger_condition}")
+            lines.append(
+                "      evidence_fields_consumed: "
+                f"{', '.join(finding.remediation.evidence_fields_consumed)}"
+            )
+            lines.append(f"      invariant_claim:           {finding.remediation.invariant_claim}")
+            lines.append(f"      action:                    {finding.remediation.action}")
+            lines.append(f"      does_not_know:             {finding.remediation.does_not_know}")
     else:
         lines.append(
             "  None. This means Gate held for every attempt actually executed — "
@@ -369,10 +488,8 @@ def render_text(report: Report) -> str:
         )
     lines.append("")
 
-    lines.append("Remediation buckets:")
-    for bucket in REMEDIATION_BUCKETS:
-        ids = report.remediation_buckets.get(bucket, [])
-        lines.append(f"  {bucket:<38} {ids or '(none)'}")
+    lines.append("Rule promotion (report-level):")
+    lines.append(f"  {report.remediation_note}")
     lines.append("")
 
     lines.append("Near-misses:")
@@ -446,24 +563,15 @@ async def fetch_report(campaign_id: uuid.UUID) -> Report:
                     findings.c.attack_turns,
                     findings.c.target_reply,
                     findings.c.matched_pattern,
+                    findings.c.gate_request_id,
                     findings.c.sanitized,
                 ).where(findings.c.campaign_id == campaign_id)
             )
             finding_rows = [dict(r) for r in finding_result.mappings()]
-
-            finding_ids = [row["id"] for row in finding_rows]
-            proposed_rule_rows: list[dict] = []
-            if finding_ids:
-                proposal_result = await connection.execute(
-                    sa.select(proposed_rules.c.finding_id, proposed_rules.c.status).where(
-                        proposed_rules.c.finding_id.in_(finding_ids)
-                    )
-                )
-                proposed_rule_rows = [dict(r) for r in proposal_result.mappings()]
     finally:
         await engine.dispose()
 
-    return build_report(dict(campaign_row), attempt_rows, finding_rows, proposed_rule_rows)
+    return build_report(dict(campaign_row), attempt_rows, finding_rows)
 
 
 def parse_args() -> argparse.Namespace:
