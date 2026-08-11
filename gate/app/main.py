@@ -817,6 +817,7 @@ async def chat_completions(request: Request) -> Response:
     detector_signals = [signal.model_dump(mode="json") for signal in input_signals]
     policy_result = input_evaluation.policy_result
     matched_rules = policy_result.matched_rules or None
+    policy_engine: PolicyEngine = request.app.state.policy_engine
 
     if policy_result.action == "block":
         rule_id = policy_result.terminal_rule_id
@@ -908,7 +909,6 @@ async def chat_completions(request: Request) -> Response:
             )
             return response
 
-        policy_engine: PolicyEngine = request.app.state.policy_engine
         stream_relay = (
             relay_buffered_stream
             if policy_engine.requires_buffered_output_streaming
