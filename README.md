@@ -216,6 +216,40 @@ LLM07 marker detection with confusables normalization active, against the
 live policy configuration. Reported as corpus composition and count, not a
 rate: 0/46 has a wide confidence interval at this sample size.
 
+**LLM01 direct-injection Gate-path corpus**: on the frozen 48-positive,
+41-negative direct user-role corpus, the live Gate path detected **10 of 48**
+positive cases at threshold **0.8**. By band: `direct_override` 6/12,
+`role_play_framing` 0/12, `encoding_obfuscation` 3/12, and `multi_step_setup`
+1/12. 75% of the positive cases were published-derived adaptations; 12 were
+authored gap-fillers. Among the negative controls, **2 of 41** were detected;
+both were in `adjacent_vocabulary` (17 cases), while `ordinary_text` was 0/12
+and `structurally_awkward` was 0/12. 37 of the 41 negative controls were
+authored. The complete raw-score table and threshold characterization are in
+[`docs/benchmarks/llm01-direct-injection.md`](docs/benchmarks/llm01-direct-injection.md).
+
+Gate defaults to `meta-llama/Llama-Prompt-Guard-2-22M`, set by
+`MODEL_ID` in [`gate/detectors/prompt_guard.py`](gate/detectors/prompt_guard.py)
+and loaded by `PromptGuardDetector.load()`. The 22M choice is explicit in the
+implementation and its CPU hot-path comment; no model-comparison or threshold
+calibration record was found, so this result makes no claim about the 86M
+variant. The live threshold is the `0.8` `gte` matcher in
+[`gate/policy/rules.yaml`](gate/policy/rules.yaml). It was chosen in policy,
+not calibrated against this corpus.
+
+Run identity: detector config SHA-256
+`e5f806fedb5fe931b6568dfc278ce748fb951069494bb323e95ddb87e9aba5a6`, policy
+config SHA-256
+`3d704dd74a3e10afddd6a86665058d81730f132ad1d96788bf66b38b264c18c4`, model
+revision/cache `11614a155199674a0a95e6602d6ab0417b790ed0`.
+
+The original 48/36 positive-negative split was deliberately balanced for
+coverage measurement, not realistic traffic where injections are rare. The
+four sourced adjacent-vocabulary additions changed the final inventory to
+48/41 before any measurement. Any resulting figure must be described as
+detection coverage across this defined positive set and its fixed controls;
+it must never be presented as expected production performance or a
+population-level rate.
+
 **Live campaign evidence**: 9 campaigns against Gate's hardened default
 profile, evidence retained for all of them (`bastion report --campaign
 <id>` renders any of them). One ended in an error before any attempt row was
