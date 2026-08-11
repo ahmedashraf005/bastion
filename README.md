@@ -216,44 +216,43 @@ LLM07 marker detection with confusables normalization active, against the
 live policy configuration. Reported as corpus composition and count, not a
 rate: 0/46 has a wide confidence interval at this sample size.
 
-**LLM01 direct-injection Gate-path corpus**: on the frozen 48-positive,
-41-negative direct user-role corpus, the live Gate path detected **10 of 48**
-positive cases at threshold **0.8**. By band: `direct_override` 6/12,
-`role_play_framing` 0/12, `encoding_obfuscation` 3/12, and `multi_step_setup`
-1/12. 75% of the positive cases were published-derived adaptations; 12 were
-authored gap-fillers. Among the negative controls, **2 of 41** were detected;
-both were in `adjacent_vocabulary` (17 cases), while `ordinary_text` was 0/12
-and `structurally_awkward` was 0/12. 37 of the 41 negative controls were
-authored. The complete raw-score table and threshold characterization are in
+**LLM01 direct-injection Gate-path corpus**: the comparison uses the frozen
+48-positive, 41-negative direct user-role corpus and threshold **0.8**. Both
+models ran through the same Gate detector/policy path:
+
+| Model | Model revision/cache | Detector config SHA-256 | Positive coverage by band | Negative controls |
+|---|---|---|---|---|
+| `meta-llama/Llama-Prompt-Guard-2-22M` | `11614a155199674a0a95e6602d6ab0417b790ed0` | `e5f806fedb5fe931b6568dfc278ce748fb951069494bb323e95ddb87e9aba5a6` | **10/48**: direct 6/12, role-play 0/12, encoding 3/12, multi-step 1/12 | **2 of 41**; adjacent 2/17, ordinary 0/12, awkward 0/12 |
+| `meta-llama/Llama-Prompt-Guard-2-86M` | `a8ded8e697ce7c355e395a0df51f94adb4a2fd27` | `591caf954f87e487218d17beead4a5fcc83f386ff1dbe18fd22afc5a9be32462` | **34/48**: direct 11/12, role-play 9/12, encoding 5/12, multi-step 9/12 | **4 of 41**; adjacent 4/17, ordinary 0/12, awkward 0/12 |
+
+75% of the positive cases were published-derived adaptations; 12 were
+authored gap-fillers. 37 of the 41 negative controls were authored. Neither
+model is “the” corpus number: these are model-specific coverage results, with
+the default selection recorded separately. The complete raw-score tables and
+threshold curves are in
 [`docs/benchmarks/llm01-direct-injection.md`](docs/benchmarks/llm01-direct-injection.md).
 
 The most informative negative-control observation is
 `llm01-neg-adjacent-013`: text derived from OWASP's own prompt-injection cheat
-sheet scored **0.978705**, higher than most real attacks in this positive set.
-This suggests that, in this run, Prompt Guard is responding strongly to the
-surface form of injection language even when the user is asking about the
-example rather than issuing it. That is an observation about this detector's
-behaviour, not a claim about prompt-injection detectors generally.
+sheet scored **0.978705** on 22M and **0.997288** on 86M; both classified it as
+detected. This suggests that, in both runs, Prompt Guard is responding
+strongly to the surface form of injection language even when the user is
+asking about the example rather than issuing it. That is an observation about
+this detector's behaviour, not a claim about prompt-injection detectors
+generally.
 
 Gate defaults to `meta-llama/Llama-Prompt-Guard-2-22M`, set by
 `MODEL_ID` in [`gate/detectors/prompt_guard.py`](gate/detectors/prompt_guard.py)
-and loaded by `PromptGuardDetector.load()`. The 22M choice is explicit in the
-implementation and its CPU hot-path comment; no model-comparison or threshold
-calibration record was found, so this result makes no claim about the 86M
-variant. The live threshold is the `0.8` `gte` matcher in
+and loaded by `PromptGuardDetector.load()`. A controlled comparison can set
+`BASTION_PROMPT_GUARD_MODEL_ID`; leaving it unset preserves the 22M default.
+The live threshold is the `0.8` `gte` matcher in
 [`gate/policy/rules.yaml`](gate/policy/rules.yaml). It was chosen in policy,
 not calibrated against this corpus.
 
-Run identity: detector config SHA-256
-`e5f806fedb5fe931b6568dfc278ce748fb951069494bb323e95ddb87e9aba5a6`, policy
-config SHA-256
-`3d704dd74a3e10afddd6a86665058d81730f132ad1d96788bf66b38b264c18c4`, model
-revision/cache `11614a155199674a0a95e6602d6ab0417b790ed0`.
-
-Every LLM01 figure above is specific to the 22M variant. The 86M variant has
-not been compared and no calibration record exists; a same-corpus 86M
-comparison is the obvious next measurement and is not blocked by the current
-corpus or harness.
+The 22M/86M measurement gap is now closed for this corpus, but no calibration
+record exists and the comparison does not by itself select a default model or
+threshold. The policy config SHA-256 for both runs is
+`3d704dd74a3e10afddd6a86665058d81730f132ad1d96788bf66b38b264c18c4`.
 
 The original 48/36 positive-negative split was deliberately balanced for
 coverage measurement, not realistic traffic where injections are rare. The

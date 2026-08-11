@@ -367,26 +367,30 @@ Gate detects tool-output injections or that the threshold is calibrated.
 
 ### Threshold selection is uncalibrated
 
-The characterization curve is a finding, not merely a note about the run:
-positive coverage rises from 10/48 at the configured 0.80 threshold to 18/48
-at 0.50, while the negative-control detections remain exactly 2 throughout
-that range. The 0.80 policy choice therefore sits inside a region where
-loosening produced no additional observed negative-control detections on this
-corpus. This is directional evidence about the detector/corpus combination,
-not a production threshold recommendation.
+The characterization curve is a finding, not merely a note about the run. For
+22M, positive coverage rises from 10/48 at the configured 0.80 threshold to
+18/48 at 0.50, while the negative-control detections remain exactly 2
+throughout that range. For 86M, positive coverage is 34/48 at both 0.80 and
+0.50, while negative-control detections rise from 4 to 5 as the threshold is
+loosened. The 0.80 policy choice therefore sits in a region where loosening
+has a different cost profile for the two models. This is directional evidence
+about the detector/corpus combination, not a production threshold
+recommendation.
 
 The corpus cannot support changing live policy on its own: there are only 41
 negative controls, 37 authored, and the authored cases are especially material
 in `adjacent_vocabulary`. `gate/policy/rules.yaml:9` remains unchanged;
 changing the LLM01 threshold is Ahmed's call. A larger, more externally
 provenanced negative population and calibration protocol are required before
-using this curve to justify a production policy change.
+using either curve to justify a production policy change.
 
-### 22M versus 86M is an open measurement gap
+### 22M versus 86M comparison is complete; selection remains open
 
 Gate explicitly loads `meta-llama/Llama-Prompt-Guard-2-22M` from
-`gate/detectors/prompt_guard.py`; the 86M variant has never been compared and
-there is no calibration record. Every number in the README and the accepted
-benchmark is therefore 22M-specific. A same-corpus 86M comparison, with its
-own recorded model identity and configuration, is the obvious next measurement
-and is not blocked by the corpus or harness.
+`gate/detectors/prompt_guard.py` by default, with a controlled runtime model
+override for comparison. The same corpus now has an 86M run with its own model
+revision and detector hash: 86M detects 34/48 positives and 4/41 negative
+controls at 0.8, versus 22M's 10/48 and 2/41. The model-comparison gap is
+closed as a measurement task, but model selection remains open: the negative
+population is only 41 cases, 37 authored, and the two models have different
+negative-control behavior. There is still no threshold calibration record.
